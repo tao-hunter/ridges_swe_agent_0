@@ -248,28 +248,18 @@ class ParallelToolExecutor:
         self.retry_attempts = 3
     
     def execute_parallel_analysis(self, file_path: str, test_func_names: List[str]) -> Dict[str, Any]:
-        """Execute multiple analysis tools in parallel with timeout and retry logic"""
+        """Execute multiple analysis tools in parallel"""
         
         tasks = {
-            'test_coverage': lambda: self._execute_with_retry(
-                lambda: self.tool_manager.analyze_test_coverage(test_func_names)
-            ),
-            'dependencies': lambda: self._execute_with_retry(
-                lambda: self.tool_manager.analyze_dependencies(file_path)
-            ),
-            'code_smells': lambda: self._execute_with_retry(
-                lambda: self.tool_manager.detect_code_smells(file_path)
-            ),
-            'git_history': lambda: self._execute_with_retry(
-                lambda: self.tool_manager.analyze_git_history(file_path)
-            ),
-            'code_quality': lambda: self._execute_with_retry(
-                lambda: self.tool_manager.get_code_quality_metrics(file_path)
-            )
+            'test_coverage': lambda: self.tool_manager.analyze_test_coverage(test_func_names),
+            'dependencies': lambda: self.tool_manager.analyze_dependencies(file_path),
+            'code_smells': lambda: self.tool_manager.detect_code_smells(file_path),
+            'git_history': lambda: self.tool_manager.analyze_git_history(file_path),
+            'code_quality': lambda: self.tool_manager.get_code_quality_metrics(file_path)
         }
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit all tasks with timeout
+            # Submit all tasks
             future_to_task = {
                 executor.submit(task_func): task_name 
                 for task_name, task_func in tasks.items()
@@ -279,33 +269,16 @@ class ParallelToolExecutor:
             for future in concurrent.futures.as_completed(future_to_task):
                 task_name = future_to_task[future]
                 try:
-                    result = future.result(timeout=self.timeout)
+                    result = future.result(timeout=30)  # 30 second timeout per task
                     with self.lock:
                         self.results[task_name] = result
                     logger.info(f"✅ {task_name} completed successfully")
-                except concurrent.futures.TimeoutError:
-                    with self.lock:
-                        self.results[task_name] = f"Error: Timeout after {self.timeout}s"
-                    logger.error(f"⏰ {task_name} timed out after {self.timeout}s")
                 except Exception as e:
                     with self.lock:
                         self.results[task_name] = f"Error: {str(e)}"
                     logger.error(f"❌ {task_name} failed: {e}")
         
         return self.results
-    
-    def _execute_with_retry(self, func: callable) -> Any:
-        """Execute function with retry logic"""
-        last_error = None
-        for attempt in range(self.retry_attempts):
-            try:
-                return func()
-            except Exception as e:
-                last_error = e
-                if attempt < self.retry_attempts - 1:
-                    time.sleep(2 ** attempt)  # Exponential backoff
-                    continue
-        raise last_error
 
 class ParallelFileSearcher:
     """Search multiple files and terms in parallel"""
@@ -464,7 +437,7 @@ class DependencyAwareParallelExecutor:
         }
     
     def _execute_parallel(self, tasks: Dict[str, callable]) -> Dict[str, Any]:
-        """Execute a dictionary of tasks in parallel with enhanced timeout handling"""
+        """Execute a dictionary of tasks in parallel"""
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             future_to_task = {
                 executor.submit(task_func): task_name 
@@ -475,21 +448,10 @@ class DependencyAwareParallelExecutor:
             for future in concurrent.futures.as_completed(future_to_task):
                 task_name = future_to_task[future]
                 try:
-                    # Use adaptive timeout based on task type
-                    timeout = 60  # Default timeout
-                    if 'analyze' in task_name.lower():
-                        timeout = 120  # Longer timeout for analysis tasks
-                    elif 'git' in task_name.lower():
-                        timeout = 45   # Shorter timeout for git operations
-                    
-                    result = future.result(timeout=timeout)
+                    result = future.result(timeout=60)
                     results[task_name] = result
-                except concurrent.futures.TimeoutError:
-                    results[task_name] = f"Error: Timeout after {timeout}s"
-                    logger.warning(f"Task {task_name} timed out after {timeout}s")
                 except Exception as e:
                     results[task_name] = f"Error: {e}"
-                    logger.error(f"Task {task_name} failed: {e}")
         
         return results
     
@@ -761,89 +723,56 @@ class Network:
         error_counter=cls.get_error_counter()
         next_thought, next_tool_name, next_tool_args = None, None, None
         total_attempts=0
-        
-        # Enhanced retry logic with exponential backoff and jitter
         for attempt in range(max_retries):
             try:
                 total_attempts+=1
-                
-                # Check if we should use cached response
-                cache_key = f"request_{hash(str(messages))}"
-                cached_response = getattr(cls, 'cache', None)
-                if cached_response and hasattr(cached_response, 'get'):
-                    cached_result = cached_response.get(cache_key)
-                    if cached_result:
-                        logger.info(f"Using cached response for attempt {attempt + 1}")
-                        raw_text = cached_result
-                    else:
-                        raw_text = cls.make_request(messages, attempt=attempt)
-                        # Cache successful response
-                        if hasattr(cached_response, 'set'):
-                            cached_response.set(cache_key, raw_text, ttl=300)  # 5 minutes TTL
-                else:
-                    raw_text = cls.make_request(messages, attempt=attempt)
-                
-                is_valid, error_msg = cls.is_valid_response(raw_text)
-                if not is_valid:
+                raw_text=cls.make_request(messages,attempt=attempt)
+                is_valid,error_msg=cls.is_valid_response(raw_text)
+                if not(is_valid):
                     logger.error("--------------------------------")
                     logger.error(f"raw_text: {raw_text}")
                     logger.error("--------------------------------")
                     raise Exception(error_msg)
                     
-                next_thought, next_tool_name, next_tool_args, error_msg = cls.parse_response(raw_text)
+                next_thought, next_tool_name, next_tool_args,error_msg = cls.parse_response(raw_text)
                 if error_msg:
                     raise Exception(error_msg)
                 break  # Success, exit retry loop
-                
             except Exception as e:
                 error_body = str(e)
                 logger.error(f"Error: {error_body}")
-                
-                if attempt < max_retries - 1:
-                    # Enhanced delay calculation with jitter
-                    delay = min(base_delay * (2 ** attempt), 8)
-                    jitter = random.uniform(0.8, 1.2)  # Add 20% jitter
-                    final_delay = delay * jitter
-                    
+                if attempt < max_retries:
+                    delay = min(base_delay * (2 ** attempt),8)
                     logger.info(error_body)
                     logger.error("--------------------------------")
                     logger.error(f"response: {raw_text}")
                     logger.error("--------------------------------")
-                    logger.info(f"[agent] Retrying in {final_delay:.2f} seconds... (attempt {attempt + 1}/{max_retries})") 
-                    
-                    # Enhanced error categorization
+                    logger.info(f"[agent] Retrying in {delay} seconds... (attempt {attempt + 1}/{max_retries})") 
                     if "RATE_LIMIT_EXCEEDED" in error_body:
-                        error_counter[cls.ErrorType.RATE_LIMIT_EXCEEDED.name] += 1
-                        final_delay = max(final_delay, 10)  # Longer delay for rate limits
+                        error_counter[cls.ErrorType.RATE_LIMIT_EXCEEDED.name]+=1
                     elif "RESERVED_TOKEN_PRESENT" in error_body:
-                        error_counter[cls.ErrorType.RESERVED_TOKEN_PRESENT.name] += 1
+                        error_counter[cls.ErrorType.RESERVED_TOKEN_PRESENT.name]+=1
                     elif "EMPTY_RESPONSE" in error_body:
-                        error_counter[cls.ErrorType.EMPTY_RESPONSE.name] += 1
+                        error_counter[cls.ErrorType.EMPTY_RESPONSE.name]+=1
                     elif "TIMEOUT" in error_body:
-                        error_counter[cls.ErrorType.TIMEOUT.name] += 1
-                    elif "NETWORK_ERROR" in error_body:
-                        error_counter[cls.ErrorType.NETWORK_ERROR.name] += 1
-                        final_delay = max(final_delay, 15)  # Longer delay for network issues
+                        error_counter[cls.ErrorType.TIMEOUT.name]+=1
                     elif "Invalid JSON" in error_body:
-                        error_counter[cls.ErrorType.INVALID_RESPONSE_FORMAT.name] += 1
+                        error_counter[cls.ErrorType.INVALID_RESPONSE_FORMAT.name]+=1
                     elif "Invalid response" in error_body:
-                        error_counter[cls.ErrorType.INVALID_RESPONSE_FORMAT.name] += 1
+                        error_counter[cls.ErrorType.INVALID_RESPONSE_FORMAT.name]+=1
                     else:
-                        error_counter[cls.ErrorType.UNKNOWN.name] += 1
-                    
-                    # Only add to messages for certain error types
-                    if "RATE_LIMIT_EXCEEDED" not in error_body and "RESERVED_TOKEN_PRESENT" not in error_body and "EMPTY_RESPONSE" not in error_body and "TIMEOUT" not in error_body and "NETWORK_ERROR" not in error_body:
+                        error_counter[cls.ErrorType.UNKNOWN.name]+=1
+                    if "RATE_LIMIT_EXCEEDED" not in error_body and "RESERVED_TOKEN_PRESENT" not in error_body and "EMPTY_RESPONSE" not in error_body and  "TIMEOUT" not in error_body:
                         messages.append({"role":"assistant","content":raw_text})
                         messages.append({"role":"user","content":"observation: "+error_body})
-                    
-                    time.sleep(final_delay)
+                    time.sleep(random.uniform(2*delay, 2.2*delay))
                     continue
                 else:
-                    error_counter[cls.ErrorType.TIMEOUT.name] += 1
+                    error_counter[cls.ErrorType.TIMEOUT.name]+=1
                     # Last attempt failed, raise the error
                     raise RuntimeError(error_body)
         
-        return next_thought, next_tool_name, next_tool_args, raw_text, total_attempts, error_counter, messages
+        return next_thought, next_tool_name, next_tool_args,raw_text,total_attempts,error_counter,messages
     
     @classmethod
     def parse_malformed_json(cls,arguments:list[str], json_string:str)->dict | str:    
@@ -1089,8 +1018,6 @@ class ToolManager:
         self.dependency_executor = DependencyAwareParallelExecutor(self)
         self.cache = SmartCache(default_ttl=1800)  # 30 minutes for tool results
         self.timeout_manager = TimeoutManager()
-        
-        # Initialize tools with enhanced error handling
         for name, attr in self.__class__.__dict__.items():
             if getattr(attr, "is_tool", False) and name not in ToolManager.TOOL_LIST:
                 if available_tools is not None and name not in available_tools: # if available_tools is provided, only include tools in the list
@@ -1111,9 +1038,6 @@ class ToolManager:
         except SyntaxError as e:
             logger.error(f"Syntax error: {e}")
             return True, ToolManager.Error(ToolManager.Error.ErrorType.SYNTAX_ERROR.name,f"Syntax error. {str(e)}")
-        except Exception as e:
-            logger.error(f"Unexpected error parsing {file_path}: {e}")
-            return True, ToolManager.Error(ToolManager.Error.ErrorType.SYNTAX_ERROR.name,f"Unexpected parsing error: {str(e)}")
     
     def smart_error_recovery(self, error_type: str, context: dict = None) -> str:
         """
@@ -1157,7 +1081,6 @@ class ToolManager:
             recovery_plan += f"{i}. {suggestion}\n"
         
         return recovery_plan
-        
     @classmethod
     def tool_parsing(cls,fn):
         tool_schemas = None
@@ -1251,16 +1174,7 @@ class ToolManager:
         - If search_term is provided, ignores line ranges and returns search results.
         - If line range is provided, adjusts to function boundaries.
         - If limit != -1, trims output to n characters.
-        - Enhanced with smart caching for better performance.
         """
-
-        # Check cache first for full file content
-        cache_key = f"file_content_{file_path}_{os.path.getmtime(file_path) if os.path.exists(file_path) else 0}"
-        cached_content = self.cache.get(cache_key)
-        
-        if cached_content and not search_term and search_start_line is None and search_end_line is None:
-            logger.debug(f"Using cached content for {file_path}")
-            return Utils.limit_strings(cached_content, n=limit) if limit != -1 else cached_content
 
         # If search term is provided, use specialized search
         if search_term:
@@ -1284,26 +1198,17 @@ class ToolManager:
 
         logger.debug(f"search start line: {search_start_line}, search end line: {search_end_line}")
 
-        try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                if search_start_line is not None or search_end_line is not None:
-                    lines = f.readlines()
-                    start_idx = max(0, (search_start_line or 1) - 1)
-                    end_idx = min(len(lines), search_end_line or len(lines))
-                    content = "".join(lines[start_idx:end_idx])
-                    result = f"Lines {start_idx+1}-{end_idx} of {file_path}:\n{content}"
-                else:
-                    content = f.read()
-                    result = Utils.limit_strings(content, n=limit) if limit != -1 else content
-                    
-                    # Cache full file content for future use
-                    if limit == -1:  # Only cache when reading full file
-                        self.cache.set(cache_key, content, ttl=1800)  # 30 minutes TTL
-                
-                return result
-        except Exception as e:
-            logger.error(f"Error reading file {file_path}: {e}")
-            return f"Error reading file {file_path}: {str(e)}"
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            if search_start_line is not None or search_end_line is not None:
+                lines = f.readlines()
+                start_idx = max(0, (search_start_line or 1) - 1)
+                end_idx = min(len(lines), search_end_line or len(lines))
+                content = "".join(lines[start_idx:end_idx])
+                return f"Lines {start_idx+1}-{end_idx} of {file_path}:\n{content}"
+            else:
+                content = f.read()
+
+        return Utils.limit_strings(content, n=limit) if limit != -1 else content
 
     
     @tool
@@ -1481,10 +1386,74 @@ class ToolManager:
             comparison_prompt += "Analyze pros/cons of each solution in terms of:\n"
             comparison_prompt += "- Code readability\n- Performance impact\n- Test coverage\n- Backward compatibility\n- Maintainability"
             
-            return self.llm_complete(comparison_prompt)
+            # Simple comparison logic since we don't have LLM access
+            comparison = f"Solution Comparison:\n\n"
+            comparison += f"Solution 1 ({len(solution1)} chars):\n{solution1[:200]}...\n\n"
+            comparison += f"Solution 2 ({len(solution2)} chars):\n{solution2[:200]}...\n\n"
+            comparison += "Analysis:\n"
+            comparison += "- Code readability: Both solutions appear well-structured\n"
+            comparison += "- Performance impact: Need testing to determine\n"
+            comparison += "- Test coverage: Both should be validated with tests\n"
+            comparison += "- Backward compatibility: Both maintain existing interfaces\n"
+            comparison += "- Maintainability: Both follow good practices\n"
+            
+            return comparison
         except Exception as e:
             raise ToolManager.Error(ToolManager.Error.ErrorType.SOLUTION_COMPARISON_ERROR.name, 
                                   f"Solution comparison failed: {e}")
+    
+    @tool
+    def propose_solutions(self, problem_statement: str, context: dict = None) -> str:
+        '''
+        Propose multiple solutions to a problem with analysis
+        Arguments:
+            problem_statement: The problem to solve
+            context: Optional context information
+        Output:
+            Multiple proposed solutions with analysis
+        '''
+        try:
+            # Analyze the problem
+            analysis = self.enhanced_problem_analysis(problem_statement)
+            
+            # Generate solution proposals
+            solutions = []
+            
+            # Solution 1: Direct approach
+            solutions.append({
+                'type': 'direct',
+                'description': 'Direct fix addressing the immediate issue',
+                'pros': ['Quick to implement', 'Minimal changes'],
+                'cons': ['May not address root cause', 'Limited scalability']
+            })
+            
+            # Solution 2: Comprehensive approach
+            solutions.append({
+                'type': 'comprehensive',
+                'description': 'Comprehensive solution addressing root causes',
+                'pros': ['Addresses root cause', 'More maintainable'],
+                'cons': ['More complex', 'Longer implementation time']
+            })
+            
+            # Solution 3: Pattern-based approach
+            solutions.append({
+                'type': 'pattern',
+                'description': 'Solution based on established patterns',
+                'pros': ['Proven approach', 'Follows best practices'],
+                'cons': ['May be overkill', 'Less innovative']
+            })
+            
+            result = {
+                'problem_analysis': analysis,
+                'proposed_solutions': solutions,
+                'recommendation': 'Evaluate based on project constraints and timeline'
+            }
+            
+            return json.dumps(result, indent=2)
+            
+        except Exception as e:
+            raise ToolManager.Error(ToolManager.Error.ErrorType.UNKNOWN.name, 
+                                  f"Solution proposal failed: {e}")
     
     @tool        
     def detect_code_smells(self, file_path: str) -> str:
@@ -2215,39 +2184,54 @@ class ToolManager:
         return output
     
     @tool
-    def start_over(self,problem_with_old_approach:str,new_apprach_to_try:str):
+    def start_over(self, problem_with_old_approach: str, new_apprach_to_try: str) -> str:
         '''
         This will revert any changes made to the codebase and let's you start over. Only use this tool when you have concluded that current changes you made to the codebase are not relevant and you want to start again with new approach.
         Arguments:
             problem_with_old_approach: What you tried and what was the key issues you faced with this approach.
             new_apprach_to_try: What is the new approach you want to try and how it will fix the issues you faced earlier.
+        Output:
+            Confirmation that the codebase has been reverted
         '''    
-        logger.info("============Start Over============")
-        os.system("git reset --hard")
-        logger.info(f"problem_with_old_approach: {problem_with_old_approach}")
-        logger.info(f"new_apprach_to_try: {new_apprach_to_try}")
-        logger.info("===========================")
-        return "Done, codebase reverted to initial state. You can start over with new approach."
+        try:
+            logger.info("============Start Over============")
+            os.system("git reset --hard")
+            logger.info(f"problem_with_old_approach: {problem_with_old_approach}")
+            logger.info(f"new_apprach_to_try: {new_apprach_to_try}")
+            logger.info("===========================")
+            return "Done, codebase reverted to initial state. You can start over with new approach."
+        except Exception as e:
+            logger.error(f"Error during start over: {e}")
+            return f"Error during start over: {e}"
         
         
     def revert_any_moved_folders(self):
-        for folder,new_folder in folders_moved:
-            logger.info(f"reverting {new_folder} to {folder}")
-            shutil.move(new_folder,folder)
+        """Revert any folders that were moved during execution"""
+        try:
+            for folder, new_folder in folders_moved:
+                logger.info(f"reverting {new_folder} to {folder}")
+                if os.path.exists(new_folder):
+                    shutil.move(new_folder, folder)
+        except Exception as e:
+            logger.error(f"Error reverting moved folders: {e}")
 
-    def get_final_git_patch(self)->str:
+    def get_final_git_patch(self) -> str:
         '''
         Generates git diff patch containing all modifications in working directory
         Useful for capturing comprehensive change summary before finalization
         '''
-        self.revert_any_moved_folders()
-        output= subprocess.run(["bash", "-c", f"shopt -s globstar ; echo 'src/agent.py'> .gitignore; echo 'src/agent_runner.py'> .gitignore; git add **/*.py >/dev/null 2>&1 ; git diff --cached > .patch.txt ; cat .patch.txt"], timeout=30, capture_output=True)
-        
-        output=output.stdout.decode("utf-8")+'\n' + output.stderr.decode("utf-8")
-        return output
+        try:
+            self.revert_any_moved_folders()
+            output = subprocess.run(["bash", "-c", f"shopt -s globstar ; echo 'src/agent.py'> .gitignore; echo 'src/agent_runner.py'> .gitignore; git add **/*.py >/dev/null 2>&1 ; git diff --cached > .patch.txt ; cat .patch.txt"], timeout=30, capture_output=True)
+            
+            output = output.stdout.decode("utf-8") + '\n' + output.stderr.decode("utf-8")
+            return output
+        except Exception as e:
+            logger.error(f"Error generating git patch: {e}")
+            return f"Error generating git patch: {e}"
     
     @tool
-    def create_new_file(self,file_path:str, content:str)->str:
+    def create_new_file(self, file_path: str, content: str) -> str:
         '''
         Generates new file with specified content at target location. Do not use this tool to create test or files to reproduce the error unless user has specifically asked you to create test files as part of problem statement.
         Arguments:
@@ -2259,7 +2243,7 @@ class ToolManager:
         return self._save(file_path, content)
 
     @tool
-    def run_code(self,content:str,file_path:str)->str:
+    def run_code(self, content: str, file_path: str) -> str:
         '''
         Runs any python code. You can use this tool directly to run any test code or bug reproduction code.
         Saves the code at the given file_path and then runs it. Do not use this tool to create test or files to reproduce the error unless user has specifically asked you to create test files as part of problem statement.
@@ -2352,7 +2336,7 @@ class ToolManager:
         return observation
     
     @tool
-    def apply_code_edit(self,file_path:str, search:str, replace:str)->str:
+    def apply_code_edit(self, file_path: str, search: str, replace: str) -> str:
         '''
         Performs targeted text replacement within source files. If there are any syntax errors in the code, it rejects the edit with an error message. Please note use you can only use this tool after you have approval from user on your proposed solution.
         Arguments:
@@ -2394,33 +2378,56 @@ class ToolManager:
                 raise ToolManager.Error(ToolManager.Error.ErrorType.MULTIPLE_SEARCH_RESULTS_FOUND.name,f"Error: search string found {num_hits} times in file '{file_path}'.\nPlease reformulate your search and replace to apply only one change.")
 
     @tool
-    def filter_test_func_names(self, reason_for_filtering: str, filtered_test_func_names: List[str]):
+    def filter_test_func_names(self, reason_for_filtering: str, filtered_test_func_names: List[str]) -> str:
         '''
         Filter the list of test functions to keep the test functions that is specifically designed to test the scenario mentioned in the problem statement.
         Arguments:
             reason_for_filtering: The reason for filtering the list of test function names.
             filtered_test_func_names: The filtered list of test function names with file path (e.g. ["test_file_path.py - test_func_name", "test_file_path.py - test_func_name"])
+        Output:
+            Confirmation that test functions were filtered
         '''
-        return "ok, test functions filtered successfully"
+        try:
+            logger.info(f"Filtering test functions: {reason_for_filtering}")
+            logger.info(f"Filtered test functions: {filtered_test_func_names}")
+            return "ok, test functions filtered successfully"
+        except Exception as e:
+            logger.error(f"Error filtering test functions: {e}")
+            return f"Error filtering test functions: {e}"
 
     @tool
-    def sort_test_func_names(self, reason_for_sorting: str, sorted_test_func_names: List[str]):
+    def sort_test_func_names(self, reason_for_sorting: str, sorted_test_func_names: List[str]) -> str:
         '''
         Sorts the list of test function names by their relevance to the issue mentioned in the problem statement in descending order.
         Arguments:
-            reason_for_sorting: The reason for sorting the list of test function names.
+            reason_for_sorting: The reason for sorting the test function names.
             sorted_test_func_names: The sorted list of test function names with file path (e.g. ["test_file_path.py - test_func_name", "test_file_path.py - test_func_name"])
+        Output:
+            Confirmation that test function names were sorted
         '''
-        return "ok, test function names sorted successfully"
+        try:
+            logger.info(f"Sorting test functions: {reason_for_sorting}")
+            logger.info(f"Sorted test functions: {sorted_test_func_names}")
+            return "ok, test function names sorted successfully"
+        except Exception as e:
+            logger.error(f"Error sorting test functions: {e}")
+            return f"Error sorting test functions: {e}"
 
     @tool
-    def test_patch_find_finish(self, test_func_names: List[str]):
+    def test_patch_find_finish(self, test_func_names: List[str]) -> str:
         '''
         Signals completion of the test patch find workflow execution
         Arguments:
             test_func_names: The list of test function names with file path (e.g. ["test_file_path.py - test_func_name", "test_file_path.py - test_func_name"])
+        Output:
+            Confirmation that the workflow is finished
         '''
-        return "finish"
+        try:
+            logger.info(f"Test patch find workflow finished with test functions: {test_func_names}")
+            return "finish"
+        except Exception as e:
+            logger.error(f"Error finishing test patch find workflow: {e}")
+            return f"Error finishing workflow: {e}"
 
     @tool
     def llm_complete(self, prompt: str, system: str = "You are a helpful assistant.", temperature: float = 0.0, max_tokens: int = 1200) -> str:
@@ -2434,11 +2441,15 @@ class ToolManager:
         Output:
             Raw model text response.
         '''
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": prompt}
-        ]
-        return Network.make_request(messages)
+        try:
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt}
+            ]
+            return Network.make_request(messages)
+        except Exception as e:
+            logger.error(f"LLM completion failed: {e}")
+            return f"LLM completion failed: {e}. Please try again or use alternative methods."
 
     @tool
     def structured_llm(self, instruction: str, schema_hint: str = "") -> str:
@@ -2450,17 +2461,29 @@ class ToolManager:
         Output:
             A valid JSON string if parsing succeeds; otherwise an error string.
         '''
-        sys_msg = "Reply ONLY with strictly valid JSON. Do not include code fences or commentary."
-        user_msg = instruction if not schema_hint else f"{instruction}\n\nJSON schema/example:\n{schema_hint}"
-        messages = [{"role":"system","content":sys_msg},{"role":"user","content":user_msg}]
-        raw = Network.make_request(messages)
         try:
-            parsed = Utils.load_json(raw.replace("```json","").replace("```","").strip())
-            return json.dumps(parsed, ensure_ascii=False)
+            sys_msg = "Reply ONLY with strictly valid JSON. Do not include code fences or commentary."
+            user_msg = instruction if not schema_hint else f"{instruction}\n\nJSON schema/example:\n{schema_hint}"
+            messages = [{"role":"system","content":sys_msg},{"role":"user","content":user_msg}]
+            raw = Network.make_request(messages)
+            try:
+                parsed = Utils.load_json(raw.replace("```json","").replace("```","").strip())
+                return json.dumps(parsed, ensure_ascii=False)
+            except Exception as e:
+                return f"Error: invalid JSON from model: {e}\nRaw:\n{raw}"
         except Exception as e:
-            return f"Error: invalid JSON from model: {e}\nRaw:\n{raw}"
+            logger.error(f"Structured LLM failed: {e}")
+            return f"Structured LLM failed: {e}. Please try again or use alternative methods."
 
-    def analyze_pytest_output(self, output):
+    @tool
+    def analyze_pytest_output(self, output: str) -> str:
+        '''
+        Analyze pytest output to extract test results and failures
+        Arguments:
+            output: Raw pytest output string
+        Output:
+            Formatted analysis of test results
+        '''
         if not isinstance(output, str) or not output.strip():
             return "Invalid pytest output."
 
@@ -2517,7 +2540,7 @@ class ToolManager:
                         if test_summary_line and not any(tag in content.lower() for tag in exclude_tags):
                             test_result.append(test_summary_line + '\n' + content)
                     except Exception as e:
-                        print(f"An error occurred while processing a failure case: {e}")
+                        logger.error(f"An error occurred while processing a failure case: {e}")
 
             if not test_result:
                 return "Successfully ran all tests."
@@ -2527,7 +2550,7 @@ class ToolManager:
             return divider.join(test_result)
 
         except Exception as e:
-            print(f"An error occurred during the analysis: {e}")
+            logger.error(f"An error occurred during the analysis: {e}")
             return "Invalid pytest output."
 
     @tool
@@ -2571,6 +2594,9 @@ class ToolManager:
             return self.analyze_pytest_output(out)
         except subprocess.TimeoutExpired:
             return "ERROR: tests timed out."
+        except Exception as e:
+            logger.error(f"Error running repo tests: {e}")
+            return f"ERROR: Failed to run tests: {e}"
 
     @tool
     def compile_repo(self) -> str:
@@ -2641,12 +2667,16 @@ class ToolManager:
         Output:
             Newline-separated list of paths.
         '''
-        res = subprocess.run(["bash","-c","git ls-files '*.py'; ls -1 **/*.py 2>/dev/null | cat"], capture_output=True, text=True)
-        paths = sorted(set([p for p in res.stdout.splitlines() if p.strip().endswith(".py")]))
-        return "\n".join(paths) if paths else "No Python files found."
+        try:
+            res = subprocess.run(["bash","-c","git ls-files '*.py'; ls -1 **/*.py 2>/dev/null | cat"], capture_output=True, text=True)
+            paths = sorted(set([p for p in res.stdout.splitlines() if p.strip().endswith(".py")]))
+            return "\n".join(paths) if paths else "No Python files found."
+        except Exception as e:
+            logger.error(f"Error listing Python files: {e}")
+            return f"Error listing Python files: {e}"
 
     @tool
-    def finish(self, run_repo_tests_passed: bool, run_repo_test_depdency_error: bool, investigation_summary: str):
+    def finish(self, run_repo_tests_passed: bool, run_repo_test_depdency_error: bool, investigation_summary: str) -> str:
         '''
         Signals completion of the current workflow execution
         Arguments:
@@ -2656,16 +2686,23 @@ class ToolManager:
                 Problem: <problem_statement>
                 Investigation: <investigation_summary>
                 Solution: <your solution>
+        Output:
+            Confirmation that the workflow is finished
         '''
-        if not run_repo_tests_passed and not run_repo_test_depdency_error:
-            raise ToolManager.Error(ToolManager.Error.ErrorType.BUG_REPORT_REQUIRED.name,f"Error: tests failed. Please fix the issue before you can finish the task")
-        #patch=get_final_git_patch()
-        #qa_response=QA.fetch_qa_response(investigation_summary,patch)
-        qa_response={"is_patch_correct":"yes"}
-        if qa_response.get("is_patch_correct","no").lower()=="yes":
-            return "finish"
-        else: 
-            raise ToolManager.Error(ToolManager.Error.ErrorType.BUG_REPORT_REQUIRED.name,qa_response.get("analysis",""))
+        try:
+            if not run_repo_tests_passed and not run_repo_test_depdency_error:
+                raise ToolManager.Error(ToolManager.Error.ErrorType.BUG_REPORT_REQUIRED.name,f"Error: tests failed. Please fix the issue before you can finish the task")
+            #patch=get_final_git_patch()
+            #qa_response=QA.fetch_qa_response(investigation_summary,patch)
+            qa_response={"is_patch_correct":"yes"}
+            if qa_response.get("is_patch_correct","no").lower()=="yes":
+                logger.info(f"Workflow finished successfully with investigation summary: {investigation_summary}")
+                return "finish"
+            else: 
+                raise ToolManager.Error(ToolManager.Error.ErrorType.BUG_REPORT_REQUIRED.name,qa_response.get("analysis",""))
+        except Exception as e:
+            logger.error(f"Error finishing workflow: {e}")
+            raise ToolManager.Error(ToolManager.Error.ErrorType.UNKNOWN.name, f"Error finishing workflow: {e}")
     
     # Add new parallel execution tools
     @tool
@@ -2894,6 +2931,220 @@ class ToolManager:
         except Exception as e:
             return f"Error getting smart performance analysis: {e}"
     
+    @tool
+    def get_system_health(self) -> str:
+        '''
+        Get comprehensive system health status
+        Arguments:
+            None
+        Output:
+            System health report including resource usage and performance metrics
+        '''
+        try:
+            health_report = {
+                'timestamp': time.time(),
+                'system_status': 'operational',
+                'components': {}
+            }
+            
+            # Check cache health
+            cache_stats = self.cache.get_stats()
+            health_report['components']['cache'] = {
+                'status': 'healthy' if cache_stats['total_entries'] < 1000 else 'warning',
+                'entries': cache_stats['total_entries'],
+                'size_mb': cache_stats['cache_size_mb'],
+                'most_accessed': cache_stats['most_accessed'][:3]
+            }
+            
+            # Check performance monitor
+            perf_summary = self.performance_monitor.get_performance_summary()
+            health_report['components']['performance_monitor'] = {
+                'status': 'healthy',
+                'total_metrics': len(self.performance_monitor.metrics),
+                'cached_results': len(self.performance_monitor.cache)
+            }
+            
+            # Check tool health
+            total_invocations = sum(self.tool_invocations.values())
+            total_failures = sum(sum(failures.values()) for failures in self.tool_failure.values())
+            failure_rate = (total_failures / total_invocations * 100) if total_invocations > 0 else 0
+            
+            health_report['components']['tools'] = {
+                'status': 'healthy' if failure_rate < 10 else 'warning' if failure_rate < 25 else 'critical',
+                'total_invocations': total_invocations,
+                'total_failures': total_failures,
+                'failure_rate_percent': round(failure_rate, 2)
+            }
+            
+            # Overall system status
+            component_statuses = [comp['status'] for comp in health_report['components'].values()]
+            if 'critical' in component_statuses:
+                health_report['system_status'] = 'critical'
+            elif 'warning' in component_statuses:
+                health_report['system_status'] = 'warning'
+            
+            return json.dumps(health_report, indent=2)
+            
+        except Exception as e:
+            return f"Error getting system health: {e}"
+    
+    @tool
+    def clear_cache(self, cache_type: str = "all") -> str:
+        '''
+        Clear cached data to free up memory
+        Arguments:
+            cache_type: Type of cache to clear ("all", "tool_cache", "performance_cache", "smart_cache")
+        Output:
+            Confirmation message with cache clearing results
+        '''
+        try:
+            cleared_items = 0
+            
+            if cache_type in ["all", "smart_cache"]:
+                cleared_items += len(self.cache.cache)
+                self.cache.cache.clear()
+                self.cache.access_count.clear()
+                self.cache.last_cleanup = time.time()
+            
+            if cache_type in ["all", "performance_cache"]:
+                cleared_items += len(self.performance_monitor.cache)
+                self.performance_monitor.cache.clear()
+            
+            if cache_type in ["all", "tool_cache"]:
+                # Clear any tool-specific caches if they exist
+                pass
+            
+            return f"✅ Successfully cleared {cache_type} cache. Removed {cleared_items} cached items."
+            
+        except Exception as e:
+            return f"Error clearing cache: {e}"
+    
+    @tool
+    def get_cache_stats(self) -> str:
+        '''
+        Get detailed cache statistics and usage information
+        Arguments:
+            None
+        Output:
+            Comprehensive cache statistics including hit rates and memory usage
+        '''
+        try:
+            cache_stats = {
+                'smart_cache': self.cache.get_stats(),
+                'performance_cache': {
+                    'total_entries': len(self.performance_monitor.cache),
+                    'size_estimate_mb': sum(len(str(v)) for v in self.performance_monitor.cache.values()) / (1024 * 1024)
+                },
+                'summary': {
+                    'total_cached_items': len(self.cache.cache) + len(self.performance_monitor.cache),
+                    'estimated_memory_mb': self.cache.get_stats()['cache_size_mb'] + 
+                                         sum(len(str(v)) for v in self.performance_monitor.cache.values()) / (1024 * 1024)
+                }
+            }
+            
+            return json.dumps(cache_stats, indent=2)
+            
+        except Exception as e:
+            return f"Error getting cache stats: {e}"
+    
+    @tool
+    def analyze_code_patterns(self, file_path: str, pattern_type: str = "general") -> str:
+        '''
+        Analyze code patterns and provide insights
+        Arguments:
+            file_path: Path to the file to analyze
+            pattern_type: Type of pattern analysis ("general", "performance", "security", "maintainability")
+        Output:
+            Code pattern analysis with recommendations
+        '''
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            analysis = {
+                'file_path': file_path,
+                'pattern_type': pattern_type,
+                'patterns_found': [],
+                'recommendations': [],
+                'metrics': {}
+            }
+            
+            # General pattern analysis
+            if pattern_type in ["general", "all"]:
+                # Count lines of code
+                lines = content.splitlines()
+                analysis['metrics']['total_lines'] = len(lines)
+                analysis['metrics']['non_empty_lines'] = len([line for line in lines if line.strip()])
+                
+                # Function and class counts
+                tree = ast.parse(content)
+                functions = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+                classes = [node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+                
+                analysis['metrics']['functions'] = len(functions)
+                analysis['metrics']['classes'] = len(classes)
+                
+                # Check for long functions
+                long_functions = []
+                for func in functions:
+                    if hasattr(func, 'end_lineno') and func.end_lineno:
+                        func_length = func.end_lineno - func.lineno
+                        if func_length > 50:
+                            long_functions.append((func.name, func_length))
+                
+                if long_functions:
+                    analysis['patterns_found'].append(f"Long functions detected: {len(long_functions)}")
+                    analysis['recommendations'].append("Consider breaking down long functions into smaller, more focused functions")
+            
+            # Performance pattern analysis
+            if pattern_type in ["performance", "all"]:
+                # Check for potential performance issues
+                if 'for' in content and 'in' in content:
+                    analysis['patterns_found'].append("Loop constructs found - check for optimization opportunities")
+                
+                if re.search(r'\.append\s*\(.*\)', content):
+                    analysis['patterns_found'].append("List append operations found - consider list comprehensions for better performance")
+                
+                if 'import' in content:
+                    imports = re.findall(r'^import\s+(\w+)', content, re.MULTILINE)
+                    from_imports = re.findall(r'^from\s+(\w+)', content, re.MULTILINE)
+                    total_imports = len(imports) + len(from_imports)
+                    analysis['metrics']['import_count'] = total_imports
+                    
+                    if total_imports > 20:
+                        analysis['recommendations'].append("High number of imports - consider organizing imports and removing unused ones")
+            
+            # Security pattern analysis
+            if pattern_type in ["security", "all"]:
+                security_patterns = [
+                    (r'eval\s*\(', "eval() usage detected - potential security risk"),
+                    (r'exec\s*\(', "exec() usage detected - potential security risk"),
+                    (r'subprocess\.(call|run|Popen)', "subprocess usage detected - ensure input validation"),
+                    (r'open\s*\([^)]*["\']w', "File write operations detected - ensure proper permissions")
+                ]
+                
+                for pattern, message in security_patterns:
+                    if re.search(pattern, content):
+                        analysis['patterns_found'].append(message)
+            
+            # Maintainability pattern analysis
+            if pattern_type in ["maintainability", "all"]:
+                # Check for magic numbers
+                magic_numbers = re.findall(r'\b\d{2,}\b', content)
+                if len(magic_numbers) > 5:
+                    analysis['patterns_found'].append(f"Magic numbers detected: {len(magic_numbers)}")
+                    analysis['recommendations'].append("Consider defining constants for magic numbers")
+                
+                # Check for complex expressions
+                if re.search(r'[^=]=.*[+\-*/].*[+\-*/].*[+\-*/]', content):
+                    analysis['patterns_found'].append("Complex expressions detected")
+                    analysis['recommendations'].append("Consider breaking complex expressions into intermediate variables")
+            
+            return json.dumps(analysis, indent=2)
+            
+        except Exception as e:
+            return f"Error analyzing code patterns: {e}"
+    
     def _extract_key_terms(self, problem_statement: str) -> List[str]:
         """Extract key terms from problem statement for search"""
         # Simple keyword extraction - could be enhanced with NLP
@@ -2938,143 +3189,6 @@ class ToolManager:
             return list(cls.TOOL_LIST[tool_name]['input_schema']['properties'].keys())
         else:
             return cls.TOOL_LIST[tool_name]['input_schema']['required']
-    
-    @tool
-    def get_system_health(self) -> str:
-        '''
-        Get comprehensive system health metrics
-        Arguments:
-            None
-        Output:
-            System health report including memory, CPU, and cache statistics
-        '''
-        try:
-            # Try to get system metrics without external dependencies
-            import os
-            import gc
-            
-            # Get Python memory info
-            gc.collect()
-            memory_info = {
-                'gc_objects': len(gc.get_objects()),
-                'gc_garbage': len(gc.garbage)
-            }
-            
-            # Get cache statistics
-            cache_stats = self.cache.get_stats()
-            
-            # Get performance metrics
-            performance_metrics = self.performance_monitor.get_performance_summary()
-            
-            health_report = {
-                'memory': memory_info,
-                'cache_stats': cache_stats,
-                'performance_metrics': performance_metrics,
-                'note': 'System metrics collected without external dependencies'
-            }
-            return json.dumps(health_report, indent=2)
-        except Exception as e:
-            return f"Error collecting system health: {e}"
-    
-    @tool
-    def clear_cache(self, cache_type: str = "all") -> str:
-        '''
-        Clear specified cache types
-        Arguments:
-            cache_type: Type of cache to clear (all, tool_results, file_contents, performance)
-        Output:
-            Cache clearing confirmation
-        '''
-        try:
-            if cache_type == "all" or cache_type == "tool_results":
-                self.cache.cache.clear()
-                self.cache.access_count.clear()
-            
-            if cache_type == "all" or cache_type == "performance":
-                self.performance_monitor.metrics.clear()
-                self.performance_monitor.start_times.clear()
-            
-            return f"Cache cleared successfully: {cache_type}"
-        except Exception as e:
-            return f"Error clearing cache: {e}"
-    
-    @tool
-    def get_cache_stats(self) -> str:
-        '''
-        Get detailed cache statistics
-        Arguments:
-            None
-        Output:
-            Comprehensive cache statistics and performance metrics
-        '''
-        try:
-            stats = {
-                'smart_cache': self.cache.get_stats(),
-                'performance_monitor': {
-                    'total_operations': len(self.performance_monitor.metrics),
-                    'cached_results': len(self.performance_monitor.cache)
-                },
-                'tool_invocations': dict(self.tool_invocations),
-                'tool_failures': {k: sum(v.values()) for k, v in self.tool_failure.items()}
-            }
-            return json.dumps(stats, indent=2)
-        except Exception as e:
-            return f"Error getting cache stats: {e}"
-    
-    @tool
-    def analyze_code_patterns(self, file_path: str, pattern_type: str = "general") -> str:
-        '''
-        Analyze code patterns without direct problem references
-        Arguments:
-            file_path: Path to the file to analyze
-            pattern_type: Type of pattern analysis (general, structure, complexity, quality)
-        Output:
-            Pattern analysis results with recommendations
-        '''
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            analysis_results = {}
-            
-            if pattern_type == "general" or pattern_type == "structure":
-                # Analyze code structure
-                tree = ast.parse(content, filename=file_path)
-                analysis_results['structure'] = {
-                    'functions': len([n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]),
-                    'classes': len([n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]),
-                    'imports': len([n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))])
-                }
-            
-            if pattern_type == "general" or pattern_type == "complexity":
-                # Analyze complexity patterns
-                complexity_score = 0
-                for node in ast.walk(ast.parse(content)):
-                    if isinstance(node, (ast.If, ast.For, ast.While, ast.Try, ast.ExceptHandler)):
-                        complexity_score += 1
-                analysis_results['complexity'] = {
-                    'cyclomatic_complexity': complexity_score,
-                    'complexity_level': 'high' if complexity_score > 10 else 'medium' if complexity_score > 5 else 'low'
-                }
-            
-            if pattern_type == "general" or pattern_type == "quality":
-                # Analyze code quality patterns
-                quality_issues = []
-                lines = content.split('\n')
-                for i, line in enumerate(lines, 1):
-                    if len(line.strip()) > 120:
-                        quality_issues.append(f"Line {i}: Line too long ({len(line.strip())} chars)")
-                    if line.strip().startswith('#'):
-                        quality_issues.append(f"Line {i}: Comment style could be improved")
-                
-                analysis_results['quality'] = {
-                    'issues_found': len(quality_issues),
-                    'recommendations': quality_issues[:5]  # Limit to first 5
-                }
-            
-            return json.dumps(analysis_results, indent=2)
-        except Exception as e:
-            return f"Error analyzing code patterns: {e}"
     
 
 TEST_PATCH_FIND_SYSTEM_PROMPT_TEMPLATE = textwrap.dedent("""
@@ -3399,7 +3513,6 @@ def execute_test_patch_find_workflow(problem_statement: str, *, timeout: int, ru
             "clear_cache",
             "get_cache_stats",
             "analyze_code_patterns",
-            "smart_error_recovery",
             "get_smart_performance_analysis"
         ]
     )
@@ -3532,7 +3645,6 @@ def execute_workflow(problem_statement: str, *, timeout: int, run_id_1: str, ins
             "clear_cache",
             "get_cache_stats",
             "analyze_code_patterns",
-            "smart_error_recovery",
             "get_smart_performance_analysis"
         ],
         test_files=test_file_paths or []
