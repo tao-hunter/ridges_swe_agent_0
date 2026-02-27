@@ -11,7 +11,7 @@ import textwrap
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from json import JSONDecodeError
 import re
 
@@ -38,7 +38,7 @@ You are a code analysis expert tasked with identifying test functions that direc
    - Note expected input/output behaviors
 
 2. **Test Discovery**
-   - Use `search_in_all_files_content_v2` with multiple search strategies
+   - Use `search_in_all_files_content_with_grep` with multiple search strategies
    - Use `analyze_test_coverage` to verify test relevance
    - Use `analyze_dependencies` to understand test relationships
 
@@ -50,17 +50,17 @@ You are a code analysis expert tasked with identifying test functions that direc
    - Confirm test functions fail with the described issue
 
 **🛠️ Available Tools**
-- `search_in_all_files_content_v2`: Find test patterns across the repo
+- `search_in_all_files_content_with_grep`: Find test patterns across the repo
 - `analyze_test_coverage`: Verify test coverage of proposed functions
 - `analyze_dependencies`: Understand test function relationships
-- `get_file_content`: Retrieve test function source code
+- `read_file`: Retrieve test function source code
 - `test_patch_find_finish`: Finalize test function list
 
 **⚠️ Critical Rules**
 - Only return test functions that explicitly validate the problem
 - Use `analyze_git_history` to understand historical context of test failures
 - Prioritize tests with clear assertions and minimal setup
-- If no relevant tests exist, return the most likely candidate with `analyze_test_coverage` validation
+- If no relevant tests exist, return the most likely candidate and verify coverage by `analyze_test_coverage` 
 - Always use the exact tool names from the provided documentation (e.g., `search_in_specified_file_v2`, not `search_in_specified_file`)
 - Never guess parameter names; refer to the tool's input schema
 - If a tool is not available, explicitly state it and proceed to the next step
@@ -83,7 +83,7 @@ You are a code analysis expert tasked with identifying test functions that direc
    - Note expected input/output behaviors
 
 2. **Test Discovery**
-   - Use `search_in_all_files_content_v2` with multiple search strategies: **TRY DIVERSE SEARCH TERMS** from the problem statement, with **key words**, **specified functions or classes**, etc.
+   - Use `search_in_all_files_content_with_grep` with multiple search strategies: **TRY DIVERSE SEARCH TERMS** from the problem statement, with **key words**, **specified functions or classes**, etc.
    - Try to search the codebase for distinctive variables, literals, special characters, etc.
    - Use `analyze_dependencies` to understand test relationships
 
@@ -94,21 +94,21 @@ You are a code analysis expert tasked with identifying test functions that direc
    - Confirm test functions fail with the described issue
 
 **🛠️ Available Tools**
-- `search_in_all_files_content_v2`: Find test patterns across the repo
+- `search_in_all_files_content_with_grep`: Find test patterns across the repo
 - `analyze_dependencies`: Understand test function relationships
-- `get_file_content`: Retrieve test function source code
+- `read_file`: Retrieve test function source code
 - `filter_test_func_names`: Filter test functions.
 - `test_patch_find_finish`: Finalize test function list
 - `parallel_codebase_analysis`: Perform comprehensive analysis using parallel execution
 - `parallel_test_discovery`: Discover test functions using parallel search strategies
 - `parallel_file_operations`: Perform multiple file operations in parallel
-- `get_performance_metrics`: Get performance metrics from parallel operations
+
 
 
 **⚠️ Critical Rules**
 - Only return test functions that explicitly validate the problem
 - Prioritize tests with clear assertions and minimal setup
-- Always use the exact tool names from the provided documentation (e.g., `search_in_specified_file_v2`, not `search_in_specified_file`)
+- Always use the exact tool names from the provided documentation (e.g., `search_in_specified_file`, not `search_in_specified_file`)
 - Never guess parameter names; refer to the tool's input schema
 - If a tool is not available, explicitly state it and proceed to the next step
 
@@ -117,21 +117,20 @@ You are a code analysis expert tasked with identifying test functions that direc
 - Prefer batching independent operations together to reduce total steps and latency.
 - Tools will be executed one by one in the order of `next_tool_name` and `next_tool_args`.
 - Good candidates to batch in one step:
-  - Multiple repo searches with `search_in_all_files_content_v2` (different patterns/terms)
-  - Multiple file reads with `get_file_content` (different `file_path`s)
+  - Multiple repo searches with `search_in_all_files_content_with_grep` (different patterns/terms)
+  - Multiple file reads with `read_file` (different `file_path`s)
   - Mixed reads + searches (e.g., read 2 files and run 2 searches concurrently)
-  - Per-file analyses across a set of files (e.g., `detect_code_smells`, `get_code_quality_metrics`) — use parallel arrays and keep index alignment
 - Best practices for efficient multi-tool usage:
   - `filter_test_func_names` should be called **individually**.
   - Keep arrays ordered; results are returned in the same order as tools
   - Deduplicate identical tool calls; do not call the same tool with identical args twice
   - Use broadcasting for shared args by supplying a single args object when appropriate
   - Cap one step to a reasonable batch size (e.g., 3–8 calls) to avoid timeouts; if more items exist, paginate across steps
-  - Prefer targeted reads: when possible, use `search_in_specified_file_v2` or `get_file_content` with `search_term`/line ranges instead of reading whole files
+  - Prefer targeted reads: when possible, use `search_in_specified_file` or `read_file` with `search_term`/line ranges instead of reading whole files
   - After an initial search step yields candidate file paths, in the next step batch-read those files and batch-run analyses together
 - Example (mixing tools):
   next_thought: "Search for target symbol and read top candidates concurrently"
-  next_tool_name: ["search_in_all_files_content_v2", "get_file_content", "get_file_content"]
+  next_tool_name: ["search_in_all_files_content_with_grep", "read_file", "read_file"]
   next_tool_args: [
     {{ "grep_search_command": "grep -rn --include='*.py' . -e 'def target_fn\\('\"", "test_files_only": false }},
     {{ "file_path": "pkg/module_a.py" }},
@@ -157,8 +156,8 @@ Your task: Fix all the failures from `run_repo_tests` test.
 
 ## 🔹 Workflow
 1. Use `run_repo_tests` to run the test.
-2. Analyze the failure and propose fixes carefully. You can use relevant tools to read and understand the code like `search_in_all_files_content_v2`, `get_file_content`, `search_in_specified_file_v2`, `search_recurive_in_all_files_in_directory`, and `analyze_dependencies`.
-3. Use `apply_code_edit_and_run_repo_tests` to fix the code and run the test immediately. You can add debug prints and run tests too. For debug prints: use `print("DEBUG: <message>")` or `print(f"DEBUG: <message> {{<variable>}}")`
+2. Analyze the failure and propose fixes carefully. You can use relevant tools to read and understand the code like `search_in_all_files_content_with_grep`, `read_file`, `search_in_specified_file`, `search_recurive_in_all_files_in_directory`, and `analyze_dependencies`.
+3. Use `apply_code_edit_and_run_repo_tests` to fix the code and run the test immediately. You can add debug prints and run tests too.
 4. Use `apply_code_edit` to fix the code, but not run the test immediately.
 5. Use `run_repo_tests` to run the test again.
 7. Repeat the process until all the failures are fixed. You will see "Successfully ran all tests." from `run_repo_tests`.
@@ -218,7 +217,6 @@ Your task: Make the necessary code changes to resolve the issue and pass the pro
 **✅ Validation** 
 1. Run `validate_solution` to confirm test function results
 2. Use `run_repo_tests` to verify fixes
-3. Use `detect_code_smells` to verify no new smells introduced
 ---
 
 You have access to the following tools:
@@ -259,7 +257,7 @@ FORMAT_PROMPT_V0=textwrap.dedent("""
    }
 
 4. **Invalid Format Examples** (Avoid These):
-   - Incorrect next_tool_name such as "search_in_all_files_content" instead correct tool name - "search_in_all_files_content_v2"
+   - Incorrect next_tool_name such as "search_in_all_files_content" instead correct tool name - "search_in_all_files_content_with_grep"
    - Missing any of the three required fields
    - JSON syntax errors in next_tool_args
    - Extra text outside the triplet format
@@ -304,7 +302,7 @@ FORMAT_PROMPT_V1=textwrap.dedent("""
    next_tool_args: [{}, {}]
 
 4. **Invalid Format Examples** (Avoid These):
-   - Incorrect next_tool_name such as "search_in_all_files_content" instead correct tool name - "search_in_all_files_content_v2"
+   - Incorrect next_tool_name such as "search_in_all_files_content" instead correct tool name - "search_in_all_files_content_with_grep"
    - Missing any of the three required fields
    - JSON syntax errors in next_tool_args
    - Extra text outside the triplet format
@@ -405,7 +403,7 @@ EXPECTED_ACCURACY_IMPROVEMENT = {
 
 
 PYTEST_COMMAND_TEMPLATE = textwrap.dedent("""\
-python -c "import sys, os, pytest, collections, collections.abc, urllib3.exceptions, _pytest.pytester, shutil, types;
+python -c "import sys, os, pytest, collections, collections.abc, urllib3.exceptions, _pytest.pytester, numpy, shutil, types;
 collections.Mapping = collections.abc.Mapping;
 collections.MutableMapping = collections.abc.MutableMapping;
 collections.MutableSet = collections.abc.MutableSet;
@@ -415,6 +413,7 @@ collections.Iterable = collections.abc.Iterable;
 urllib3.exceptions.SNIMissingWarning = urllib3.exceptions.DependencyWarning;
 pytest.RemovedInPytest4Warning = DeprecationWarning;
 _pytest.pytester.Testdir = _pytest.pytester.Pytester;
+numpy.PINF = numpy.inf;
 if shutil.which('pylint') is None:
     sys.modules['pylint'] = types.ModuleType('pylint');
     sys.modules['pylint.lint'] = types.ModuleType('pylint.lint');
@@ -654,9 +653,7 @@ class ParallelToolExecutor:
         tasks = {
             'test_coverage': lambda: self.tool_manager.analyze_test_coverage(test_func_names),
             'dependencies': lambda: self.tool_manager.analyze_dependencies(file_path),
-            'code_smells': lambda: self.tool_manager.detect_code_smells(file_path),
             'git_history': lambda: self.tool_manager.analyze_git_history(file_path),
-            'code_quality': lambda: self.tool_manager.get_code_quality_metrics(file_path)
         }
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -691,7 +688,7 @@ class ParallelFileSearcher:
         
         def search_single_term(term: str) -> tuple[str, str]:
             try:
-                result = self.tool_manager.search_in_all_files_content_v2(
+                result = self.tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{term}'"
                 )
                 return term, result
@@ -745,16 +742,16 @@ class ParallelFileProcessor:
     def get_multiple_file_contents_parallel(self, file_paths: List[str]) -> Dict[str, str]:
         """Get contents of multiple files in parallel"""
         
-        def get_file_content(file_path: str) -> tuple[str, str]:
+        def read_file(file_path: str) -> tuple[str, str]:
             try:
-                content = self.tool_manager.get_file_content(file_path)
+                content = self.tool_manager.read_file(file_path)
                 return file_path, content
             except Exception as e:
                 return file_path, f"Error reading {file_path}: {e}"
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(file_paths), 5)) as executor:
             future_to_file = {
-                executor.submit(get_file_content, file_path): file_path 
+                executor.submit(read_file, file_path): file_path 
                 for file_path in file_paths
             }
             
@@ -859,9 +856,7 @@ class DependencyAwareParallelExecutor:
         """Analyze a single file with multiple tools"""
         try:
             return {
-                'content': self.tool_manager.get_file_content(file_path, limit=1000),
-                'smells': self.tool_manager.detect_code_smells(file_path),
-                'quality': self.tool_manager.get_code_quality_metrics(file_path)
+                'content': self.tool_manager.read_file(file_path, limit=1000),
             }
         except Exception as e:
             return {'error': str(e)}
@@ -2011,7 +2006,7 @@ class IntelligentSearch:
         search_results = []
         for term in key_terms:
             try:
-                result = tool_manager.search_in_all_files_content_v2(
+                result = tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{term}'",
                     test_files_only=False
                 )
@@ -2042,7 +2037,7 @@ class IntelligentSearch:
         pattern_results = []
         for pattern in patterns:
             try:
-                result = tool_manager.search_in_all_files_content_v2(
+                result = tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{pattern}'",
                     test_files_only=False
                 )
@@ -2073,7 +2068,7 @@ class IntelligentSearch:
         dep_results = []
         for term in dependency_terms:
             try:
-                result = tool_manager.search_in_all_files_content_v2(
+                result = tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{term}'",
                     test_files_only=False
                 )
@@ -2110,7 +2105,7 @@ class IntelligentSearch:
         context_results = []
         for term in contextual_terms:
             try:
-                result = tool_manager.search_in_all_files_content_v2(
+                result = tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{term}'",
                     test_files_only=False
                 )
@@ -2142,7 +2137,7 @@ class IntelligentSearch:
     def _default_search(self, problem: str, context: dict, tool_manager) -> dict:
         """Default search strategy"""
         try:
-            result = tool_manager.search_in_all_files_content_v2(
+            result = tool_manager.search_in_all_files_content_with_grep(
                 grep_search_command="grep -rn --include='*.py' . -e '.*'",
                 test_files_only=False
             )
@@ -2203,35 +2198,6 @@ class IntelligentSearch:
         relevance = min(term_count / total_words * 10, 1.0)
         return relevance
     
-    def execute_intelligent_search(self, problem_statement: str, tool_manager, context: dict = None) -> dict:
-        """
-        Execute intelligent search with multiple strategies
-        """
-        if context is None:
-            context = self.analyze_problem_context(problem_statement, [])
-        
-        # Get prioritized search strategies
-        priority_strategies = context.get('search_priority', self.search_strategies)
-        
-        # Execute searches in priority order
-        search_results = {}
-        for strategy in priority_strategies:
-            result = self.execute_search_strategy(strategy, problem_statement, context, tool_manager)
-            search_results[strategy] = result
-        
-        # Store results
-        self.search_results = search_results
-        
-        # Fusion and analysis
-        fused_results = self._fuse_search_results(search_results, context)
-        
-        return {
-            'context_analysis': context,
-            'search_results': search_results,
-            'fused_results': fused_results,
-            'recommended_strategy': priority_strategies[0] if priority_strategies else 'semantic',
-            'total_findings': self._count_total_findings(search_results)
-        }
     
     def _fuse_search_results(self, search_results: dict, context: dict) -> dict:
         """
@@ -2362,6 +2328,537 @@ class IntelligentSearch:
             summary += "\n"
         
         return summary
+
+
+
+class TestCoverage:
+
+    class FunctionVisitor(ast.NodeVisitor):
+        """AST visitor to extract function definitions from Python code."""
+        
+        def __init__(self):
+            self.functions = {}  # {function_name: (lineno, col_offset)}
+            self.classes = {}    # {class_name: {method_name: (lineno, col_offset)}}
+            self.current_class = None
+        
+        def visit_FunctionDef(self, node):
+            """Visit function definitions."""
+            if self.current_class:
+                # This is a method
+                if self.current_class not in self.classes:
+                    self.classes[self.current_class] = {}
+                self.classes[self.current_class][node.name] = (node.lineno, node.col_offset)
+            else:
+                # This is a standalone function
+                self.functions[node.name] = (node.lineno, node.col_offset)
+            
+            self.generic_visit(node)
+        
+        def visit_AsyncFunctionDef(self, node):
+            """Visit async function definitions."""
+            self.visit_FunctionDef(node)  # Treat same as regular functions
+        
+        def visit_ClassDef(self, node):
+            """Visit class definitions to track methods."""
+            old_class = self.current_class
+            self.current_class = node.name
+            self.generic_visit(node)
+            self.current_class = old_class
+
+
+    class CallVisitor(ast.NodeVisitor):
+        """AST visitor to extract function calls from Python code."""
+        
+        def __init__(self):
+            self.calls = set()  # Set of function names that are called
+        
+        def visit_Call(self, node):
+            """Visit function calls."""
+            if isinstance(node.func, ast.Name):
+                # Direct function call: func()
+                self.calls.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                # Method call: obj.method() or Class.method()
+                if isinstance(node.func.value, ast.Name):
+                    # obj.method()
+                    self.calls.add(f"{node.func.value.id}.{node.func.attr}")
+                else:
+                    # Just track the method name for simplicity
+                    self.calls.add(node.func.attr)
+            
+            self.generic_visit(node)
+
+
+    class Analyzer:
+        """Main test coverage analyzer using AST."""
+        
+        def __init__(self):
+            self.source_functions = {}  # {file_path: {func_name: (line, col)}}
+            self.source_methods = {}    # {file_path: {class.method: (line, col)}}
+            self.test_calls = set()     # Set of function names called in tests
+            
+        def analyze_source_file(self, file_path: str) -> None:
+            """Analyze a source file to extract function definitions."""
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            tree = ast.parse(content, filename=file_path)
+            visitor = TestCoverage.FunctionVisitor()
+            visitor.visit(tree)
+            
+            self.source_functions[file_path] = visitor.functions
+            
+            # Flatten class methods for easier tracking
+            methods = {}
+            for class_name, class_methods in visitor.classes.items():
+                for method_name, location in class_methods.items():
+                    methods[f"{class_name}.{method_name}"] = location
+            
+            self.source_methods[file_path] = methods
+                
+        
+        def analyze_test_file(self, file_path: str) -> None:
+            """Analyze a test file to extract function calls."""
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                tree = ast.parse(content, filename=file_path)
+                visitor = TestCoverage.CallVisitor()
+                visitor.visit(tree)
+                
+                self.test_calls.update(visitor.calls)
+                
+            except Exception as e:
+                print(f"Error analyzing test file {file_path}: {e}")
+        
+        def analyze_test_in_file(self, test_file: str, test_func: str) -> Set[str]:
+            """
+            Analyze coverage for a specific test function in a test file.
+            
+            Args:
+                test_file: Path to the test file
+                test_func: Name of the test function to analyze
+                
+            Returns:
+                Set of function names called by the specific test function
+            """
+            try:
+                with open(test_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                tree = ast.parse(content, filename=test_file)
+                
+                # Find the specific test function
+                test_function_node = None
+                for node in ast.walk(tree):
+                    if (isinstance(node, ast.FunctionDef) and node.name == test_func) or \
+                       (isinstance(node, ast.AsyncFunctionDef) and node.name == test_func):
+                        test_function_node = node
+                        break
+                
+                if test_function_node is None:
+                    print(f"Test function '{test_func}' not found in {test_file}")
+                    return set()
+                
+                # Analyze calls within this specific test function
+                visitor = TestCoverage.CallVisitor()
+                visitor.visit(test_function_node)
+                
+                return visitor.calls
+                
+            except Exception as e:
+                print(f"Error analyzing test function {test_func} in {test_file}: {e}")
+                return set()
+        
+        def generate_test_function_report(self, test_file: str, test_func: str) -> Dict:
+            """
+            Generate a coverage report for a specific test function.
+            
+            Args:
+                test_file: Path to the test file
+                test_func: Name of the test function to analyze
+                
+            Returns:
+                Dictionary containing coverage information for the specific test
+            """
+            # Get calls made by the specific test function
+            test_calls = self.analyze_test_in_file(test_file, test_func)
+            
+            report = {
+                'test_function': test_func,
+                'test_file': test_file,
+                'total_functions': 0,
+                'covered_functions': 0,
+                'coverage_percentage': 0.0,
+                'covered_items': [],
+                'files': {}
+            }
+            
+            # Check coverage against all source functions
+            for file_path in self.source_functions:
+                functions = self.source_functions[file_path]
+                methods = self.source_methods[file_path]
+                all_callables = {**functions, **methods}
+                
+                if not all_callables:
+                    continue
+                
+                file_report = {
+                    'total': len(all_callables),
+                    'covered': 0,
+                    'covered_items': []
+                }
+                
+                for func_name, location in all_callables.items():
+                    line, col = location
+                    is_covered = (
+                        func_name in test_calls or 
+                        any(func_name.split('.')[-1] in call for call in test_calls)
+                    )
+                    
+                    if is_covered:
+                        file_report['covered'] += 1
+                        item = {
+                            'name': func_name,
+                            'line': line,
+                            'file': file_path
+                        }
+                        file_report['covered_items'].append(item)
+                        report['covered_items'].append(item)
+                
+                if file_report['covered'] > 0:
+                    file_report['percentage'] = (file_report['covered'] / file_report['total']) * 100
+                    report['files'][file_path] = file_report
+                
+                report['total_functions'] += file_report['total']
+                report['covered_functions'] += file_report['covered']
+            
+            if report['total_functions'] > 0:
+                report['coverage_percentage'] = (report['covered_functions'] / report['total_functions']) * 100
+            
+            return report
+        
+        def get_functions_called_by_test(self, test_file: str, test_func: str) -> Dict[str, List[str]]:
+            """
+            Get all functions/methods called by a specified test function.
+            
+            Args:
+                test_file: Path to the test file
+                test_func: Name of the test function to analyze
+                
+            Returns:
+                Dictionary containing:
+                - 'direct_calls': List of direct function calls
+                - 'method_calls': List of method calls (obj.method format)
+                - 'all_calls': Combined list of all calls
+                - 'unique_functions': Set of unique function names (without object prefixes)
+            """
+            calls = self.analyze_test_in_file(test_file, test_func)
+            
+            direct_calls = []
+            method_calls = []
+            
+            for call in calls:
+                if '.' in call:
+                    method_calls.append(call)
+                else:
+                    direct_calls.append(call)
+            
+            # Extract unique function names (method names without object prefixes)
+            unique_functions = set()
+            for call in calls:
+                if '.' in call:
+                    unique_functions.add(call.split('.')[-1])
+                else:
+                    unique_functions.add(call)
+            
+            return {
+                'direct_calls': direct_calls,
+                'method_calls': method_calls,
+                'all_calls': list(calls),
+                'unique_functions': list(unique_functions)
+            }
+        
+        def get_test_function_call_details(self, test_file: str, test_func: str) -> Dict:
+            """
+            Get detailed information about functions/methods called by a specified test.
+            
+            Args:
+                test_file: Path to the test file
+                test_func: Name of the test function to analyze
+                
+            Returns:
+                Dictionary with detailed call information including source locations
+            """
+            calls_info = self.get_functions_called_by_test(test_file, test_func)
+            
+            # Match calls with source functions to get line numbers and files
+            matched_functions = []
+            unmatched_calls = []
+            
+            for call in calls_info['all_calls']:
+                found = False
+                
+                # Check in source functions and methods
+                for file_path in self.source_functions:
+                    # Check direct functions
+                    if call in self.source_functions[file_path]:
+                        line, col = self.source_functions[file_path][call]
+                        matched_functions.append({
+                            'call': call,
+                            'type': 'function',
+                            'file': file_path,
+                            'line': line,
+                            'column': col
+                        })
+                        found = True
+                        break
+                    
+                    # Check class methods
+                    if call in self.source_methods[file_path]:
+                        line, col = self.source_methods[file_path][call]
+                        matched_functions.append({
+                            'call': call,
+                            'type': 'method',
+                            'file': file_path,
+                            'line': line,
+                            'column': col
+                        })
+                        found = True
+                        break
+                    
+                    # Check if it's a method call that matches a method name
+                    if '.' in call:
+                        method_name = call.split('.')[-1]
+                        for full_method in self.source_methods[file_path]:
+                            if full_method.endswith('.' + method_name):
+                                line, col = self.source_methods[file_path][full_method]
+                                matched_functions.append({
+                                    'call': call,
+                                    'matched_method': full_method,
+                                    'type': 'method',
+                                    'file': file_path,
+                                    'line': line,
+                                    'column': col
+                                })
+                                found = True
+                                break
+                        if found:
+                            break
+                
+                if not found:
+                    unmatched_calls.append(call)
+            
+            return {
+                'test_function': test_func,
+                'test_file': test_file,
+                'calls_summary': calls_info,
+                'matched_functions': matched_functions,
+                'unmatched_calls': unmatched_calls,
+                'total_calls': len(calls_info['all_calls']),
+                'matched_count': len(matched_functions),
+                'unmatched_count': len(unmatched_calls)
+            }
+        
+        def print_test_function_calls(self, test_file: str, test_func: str) -> str:
+            """
+            Print a formatted report of functions/methods called by a specified test.
+            
+            Args:
+                test_file: Path to the test file
+                test_func: Name of the test function to analyze
+                
+            Returns:
+                Formatted string report
+            """
+            details = self.get_test_function_call_details(test_file, test_func)
+            
+            report_str = ""
+            report_str += "=" * 70 + "\n"
+            report_str += f"FUNCTIONS CALLED BY TEST: {test_func}\n"
+            report_str += "=" * 70 + "\n"
+            report_str += f"Test File: {os.path.relpath(test_file)}\n"
+            report_str += f"Total Calls Found: {details['total_calls']}\n"
+            report_str += f"Matched to Source: {details['matched_count']}\n"
+            report_str += f"Unmatched Calls: {details['unmatched_count']}\n"
+            report_str += "\n"
+            
+            # Show call summary
+            calls_info = details['calls_summary']
+            if calls_info['direct_calls']:
+                report_str += "Direct Function Calls:\n"
+                for call in calls_info['direct_calls']:
+                    report_str += f"  • {call}\n"
+                report_str += "\n"
+            
+            if calls_info['method_calls']:
+                report_str += "Method Calls:\n"
+                for call in calls_info['method_calls']:
+                    report_str += f"  • {call}\n"
+                report_str += "\n"
+            
+            # Show matched functions with source locations
+            if details['matched_functions']:
+                report_str += "Functions/Methods Found in Source Code:\n"
+                for func in details['matched_functions']:
+                    rel_path = os.path.relpath(func['file'])
+                    call_display = func.get('matched_method', func['call'])
+                    report_str += f"  ✓ {call_display} ({func['type']}) - line {func['line']} in {rel_path}\n"
+                report_str += "\n"
+            
+            # Show unmatched calls
+            if details['unmatched_calls']:
+                report_str += "Calls Not Found in Analyzed Source Code:\n"
+                for call in details['unmatched_calls']:
+                    report_str += f"  ? {call} (possibly external library or import)\n"
+                report_str += "\n"
+            
+            return report_str
+
+        def print_test_function_report(self, report: Dict) -> str:
+            """Print a formatted coverage report for a specific test function."""
+            report_str=""
+            report_str+="=" * 60 + "\n"
+            report_str+=f"COVERAGE REPORT FOR TEST: {report['test_function']}\n"
+            report_str+="=" * 60 + "\n"
+            report_str+=f"Test File: {os.path.relpath(report['test_file'])}\n"
+            report_str+=f"Functions Covered: {report['covered_functions']}/{report['total_functions']}\n"
+            report_str+=f"Coverage: {report['coverage_percentage']:.1f}%\n"
+            report_str+="\n"
+            
+            if report['covered_items']:
+                report_str+="Functions/Methods Covered by this Test:\n"
+                for item in report['covered_items']:
+                    rel_path = os.path.relpath(item['file'])
+                    report_str+=f"  ✓ {item['name']} (line {item['line']} in {rel_path})\n"
+            else:
+                report_str+="No functions covered by this test.\n"
+            
+            report_str+="\n"
+            return report_str
+        
+        def analyze_directory(self, source_dir: str, test_dir: str = None) -> None:
+            """Analyze all Python files in source and test directories."""
+            # Analyze source files
+            for root, dirs, files in os.walk(source_dir):
+                # Skip common non-source directories
+                dirs[:] = [d for d in dirs if d not in ['__pycache__', '.git', '.pytest_cache']]
+                
+                for file in files:
+                    if file.endswith('.py') and not file.startswith('test_'):
+                        file_path = os.path.join(root, file)
+                        self.analyze_source_file(file_path)
+            
+            # Analyze test files
+            test_directories = []
+            if test_dir:
+                test_directories.append(test_dir)
+            
+            # Also look for test files in the source directory
+            for root, dirs, files in os.walk(source_dir):
+                dirs[:] = [d for d in dirs if d not in ['__pycache__', '.git', '.pytest_cache']]
+                
+                for file in files:
+                    if file.startswith('test_') and file.endswith('.py'):
+                        file_path = os.path.join(root, file)
+                        self.analyze_test_file(file_path)
+            
+            # Analyze dedicated test directories
+            for test_dir in test_directories:
+                if os.path.exists(test_dir):
+                    for root, dirs, files in os.walk(test_dir):
+                        dirs[:] = [d for d in dirs if d not in ['__pycache__', '.git', '.pytest_cache']]
+                        
+                        for file in files:
+                            if file.endswith('.py'):
+                                file_path = os.path.join(root, file)
+                                self.analyze_test_file(file_path)
+        
+        def generate_report(self) -> Dict:
+            """Generate a coverage report."""
+            report = {
+                'total_functions': 0,
+                'covered_functions': 0,
+                'coverage_percentage': 0.0,
+                'files': {}
+            }
+            
+            for file_path in self.source_functions:
+                functions = self.source_functions[file_path]
+                methods = self.source_methods[file_path]
+                all_callables = {**functions, **methods}
+                
+                if not all_callables:
+                    continue
+                
+                file_report = {
+                    'total': len(all_callables),
+                    'covered': 0,
+                    'uncovered': [],
+                    'covered_items': []
+                }
+                
+                for func_name, location in all_callables.items():
+                    line, col = location
+                    is_covered = (
+                        func_name in self.test_calls or 
+                        any(func_name.split('.')[-1] in call for call in self.test_calls)
+                    )
+                    
+                    if is_covered:
+                        file_report['covered'] += 1
+                        file_report['covered_items'].append({
+                            'name': func_name,
+                            'line': line
+                        })
+                    else:
+                        file_report['uncovered'].append({
+                            'name': func_name,
+                            'line': line
+                        })
+                
+                file_report['percentage'] = (file_report['covered'] / file_report['total']) * 100
+                report['files'][file_path] = file_report
+                
+                report['total_functions'] += file_report['total']
+                report['covered_functions'] += file_report['covered']
+            
+            if report['total_functions'] > 0:
+                report['coverage_percentage'] = (report['covered_functions'] / report['total_functions']) * 100
+            
+            return report
+    
+        def print_report(self, report: Dict) -> str:
+            """Print a formatted coverage report."""
+            report_str=""
+            report_str+="=" * 60 + "\n"
+            report_str+="TEST COVERAGE REPORT\n"
+            report_str+="=" * 60 + "\n"
+            report_str+=f"Total Functions: {report['total_functions']}\n"
+            report_str+=f"Covered Functions: {report['covered_functions']}\n"
+            report_str+=f"Coverage: {report['coverage_percentage']:.1f}%\n"
+            report_str+="\n"
+            
+            for file_path, file_report in report['files'].items():
+                rel_path = os.path.relpath(file_path)
+                report_str+=f"File: {rel_path}\n"
+                report_str+=f"  Coverage: {file_report['percentage']:.1f}% ({file_report['covered']}/{file_report['total']})\n"
+                
+                if file_report['covered_items']:
+                    report_str+="  Covered:\n"
+                    for item in file_report['covered_items']:
+                        report_str+=f"    ✓ {item['name']} (line {item['line']})\n"
+                
+                if file_report['uncovered']:
+                    report_str+="  Uncovered:\n"
+                    for item in file_report['uncovered']:
+                        report_str+=f"    ✗ {item['name']} (line {item['line']})\n"
+                report_str+="\n"
+            return report_str
+
+
 class ToolManager:
     TOOL_LIST={}
     test_files = []
@@ -2575,7 +3072,7 @@ class ToolManager:
         return tool_method
     
     
-    def _get_file_content(
+    def _read_file(
         self,
         file_path: str,
         search_start_line: int = None,
@@ -2594,7 +3091,7 @@ class ToolManager:
         # If search term is provided, use specialized search
         if search_term:
             logger.debug(f"search_term specified: {search_term}, searching in v2")
-            return self.search_in_specified_file_v2(file_path, search_term)
+            return self.search_in_specified_file(file_path, search_term)
 
         # Adjust start/end lines if they fall within a function
         func_ranges = self.get_function_ranges(file_path)
@@ -2627,7 +3124,7 @@ class ToolManager:
 
     
     @tool
-    def get_file_content(self,file_path: str, search_start_line: int = None, search_end_line: int = None, search_term: str = None)->str:
+    def read_file(self,file_path: str, search_start_line: int = None, search_end_line: int = None, search_term: str = None)->str:
        
         '''
         Retrieves file contents with optional filtering based on search term and line numbers
@@ -2637,565 +3134,64 @@ class ToolManager:
             search_end_line: optional end line number to end extraction (1-indexed)
             search_term: optional text pattern to filter matching lines
         '''
-        return self._get_file_content(file_path,search_start_line,search_end_line,search_term,limit=5000)
+        return self._read_file(file_path,search_start_line,search_end_line,search_term,limit=5000)
     
     @tool
-    def analyze_test_coverage(self, test_func_names: List[str]) -> str:
+    def analyze_test_coverage(self, test_func_names: List[str], source_files: List[str]) -> str:
         '''
-        Analyze test coverage for proposed test functions using manual AST analysis
+        Analyze test coverage for proposed test functions
         Arguments:
-            test_func_names: List of test function names with file paths
+            test_func_names: Non empty list of test function names with file paths to analyze test coverage by
+            source_files: list of source file paths to analyze test coverage for, if list is empty returns functions called by test_func_names
         Output:
-            Coverage analysis report showing which code paths are tested
+            Coverage analysis report showing which code paths of source files are tested by test functions
         '''
+        if len(test_func_names)==0:
+            raise ToolManager.Error(ToolManager.Error.ErrorType.TEST_COVERAGE_ERROR.name, 
+                                  f"Test coverage analysis failed: test_func_names is empty, provide at least one test function name")
+        
+        
         try:
-            if not test_func_names:
-                return "No test function names provided"
+            # Use coverage.py to analyze test coverage
+            report_str = ""
+            analyzer=TestCoverage.Analyzer()
             
-            coverage_analysis = {
-                'test_functions': [],
-                'coverage_summary': {},
-                'uncovered_functions': [],
-                'total_functions': 0,
-                'covered_functions': 0,
-                'coverage_percentage': 0.0
-            }
-            
-            # Analyze each test function
-            for test_func in test_func_names:
-                test_info = self._analyze_single_test_coverage(test_func)
-                coverage_analysis['test_functions'].append(test_info)
-            
-            # Generate overall coverage statistics
-            coverage_analysis = self._calculate_overall_coverage(coverage_analysis)
-            
-            return self._format_coverage_report(coverage_analysis)
-            
-        except Exception as e:
-            raise ToolManager.Error(
-                ToolManager.Error.ErrorType.TEST_COVERAGE_ERROR.name, 
-                f"Test coverage analysis failed: {e}"
-            )
-    
-    def _analyze_single_test_coverage(self, test_func: str) -> dict:
-        """Analyze coverage for a single test function"""
-        try:
-            # Parse test function identifier (format: "file_path - function_name")
-            if " - " in test_func:
-                file_path, func_name = test_func.split(" - ", 1)
-            else:
-                # Fallback: assume it's just a function name
-                file_path = None
-                func_name = test_func
-            
-            test_info = {
-                'test_function': test_func,
-                'file_path': file_path,
-                'function_name': func_name,
-                'test_body': '',
-                'assertions_found': 0,
-                'test_complexity': 'low',
-                'coverage_scope': []
-            }
-            
-            # Get test function body if file path is available
-            if file_path and os.path.exists(file_path):
+            for source_file in source_files:
+                analyzer.analyze_source_file(source_file)
+            for test_func_name in test_func_names:
                 try:
-                    test_info['test_body'] = self.get_function_body(file_path, func_name)
-                    test_info['assertions_found'] = self._count_assertions(test_info['test_body'])
-                    test_info['test_complexity'] = self._assess_test_complexity(test_info['test_body'])
-                    test_info['coverage_scope'] = self._extract_coverage_scope(test_info['test_body'])
-                except Exception as e:
-                    test_info['error'] = f"Failed to analyze test function: {e}"
-            
-            return test_info
-            
-        except Exception as e:
-            return {
-                'test_function': test_func,
-                'error': f"Failed to analyze test: {e}"
-            }
-    
-    def _count_assertions(self, test_body: str) -> int:
-        """Count assertion statements in test body"""
-        if not test_body:
-            return 0
-        
-        assertion_patterns = [
-            r'\bassert\b',
-            r'\bassertEqual\b',
-            r'\bassertTrue\b',
-            r'\bassertFalse\b',
-            r'\bassertRaises\b',
-            r'\bassertIn\b',
-            r'\bassertNotIn\b',
-            r'\bassertIs\b',
-            r'\bassertIsNot\b',
-            r'\bassertAlmostEqual\b',
-            r'\bassertNotAlmostEqual\b',
-            r'\bassertGreater\b',
-            r'\bassertLess\b',
-            r'\bassertGreaterEqual\b',
-            r'\bassertLessEqual\b',
-            r'\bassertCountEqual\b',
-            r'\bassertDictEqual\b',
-            r'\bassertListEqual\b',
-            r'\bassertTupleEqual\b',
-            r'\bassertSetEqual\b',
-            r'\bassertMultiLineEqual\b',
-            r'\bassertRegex\b',
-            r'\bassertNotRegex\b',
-            r'\bassertWarns\b',
-            r'\bassertLogs\b',
-            r'\bassertNoLogs\b',
-            r'\bassertRaisesRegex\b',
-            r'\bassertWarnsRegex\b'
-        ]
-        
-        count = 0
-        for pattern in assertion_patterns:
-            count += len(re.findall(pattern, test_body))
-        
-        return count
-    
-    def _assess_test_complexity(self, test_body: str) -> str:
-        """Assess the complexity of a test function"""
-        if not test_body:
-            return 'unknown'
-        
-        lines = test_body.split('\n')
-        line_count = len(lines)
-        
-        # Count control structures
-        control_structures = 0
-        for line in lines:
-            stripped = line.strip()
-            if any(keyword in stripped for keyword in ['if ', 'for ', 'while ', 'try:', 'except:', 'with ']):
-                control_structures += 1
-        
-        # Count function calls
-        function_calls = len(re.findall(r'\w+\s*\(', test_body))
-        
-        # Complexity scoring
-        complexity_score = line_count + control_structures * 2 + function_calls * 0.5
-        
-        if complexity_score < 10:
-            return 'low'
-        elif complexity_score < 25:
-            return 'medium'
-        else:
-            return 'high'
-    
-    def _extract_coverage_scope(self, test_body: str) -> list:
-        """Extract what the test is covering based on its content"""
-        coverage_scope = []
-        
-        if not test_body:
-            return coverage_scope
-        
-        # Look for class instantiations
-        class_instances = re.findall(r'(\w+)\s*=\s*(\w+)\(', test_body)
-        for var_name, class_name in class_instances:
-            coverage_scope.append(f"Class: {class_name}")
-        
-        # Look for function calls
-        function_calls = re.findall(r'(\w+)\.(\w+)\s*\(', test_body)
-        for obj_name, method_name in function_calls:
-            coverage_scope.append(f"Method: {obj_name}.{method_name}")
-        
-        # Look for direct function calls
-        direct_calls = re.findall(r'(\w+)\s*\(', test_body)
-        for func_name in direct_calls:
-            if func_name not in ['self', 'cls', 'assert', 'print', 'len', 'str', 'int', 'float', 'list', 'dict', 'set', 'tuple']:
-                coverage_scope.append(f"Function: {func_name}")
-        
-        # Look for imports to understand dependencies
-        imports = re.findall(r'from\s+(\w+)\s+import\s+(\w+)', test_body)
-        for module_name, item_name in imports:
-            coverage_scope.append(f"Import: {module_name}.{item_name}")
-        
-        return list(set(coverage_scope))  # Remove duplicates
-    
-    def _calculate_overall_coverage(self, coverage_analysis: dict) -> dict:
-        """Calculate overall coverage statistics"""
-        total_tests = len(coverage_analysis['test_functions'])
-        successful_tests = sum(1 for test in coverage_analysis['test_functions'] if 'error' not in test)
-        
-        # Count total functions in the codebase
-        total_functions = self._count_total_functions_in_codebase()
-        
-        # Estimate covered functions based on test assertions and scope
-        covered_functions = self._estimate_covered_functions(coverage_analysis['test_functions'])
-        
-        coverage_analysis.update({
-            'total_tests': total_tests,
-            'successful_tests': successful_tests,
-            'total_functions': total_functions,
-            'covered_functions': covered_functions,
-            'coverage_percentage': (covered_functions / total_functions * 100) if total_functions > 0 else 0.0
-        })
-        
-        return coverage_analysis
-    
-    def _count_total_functions_in_codebase(self) -> int:
-        """Count total functions in the codebase"""
-        try:
-            # Use existing method to find Python files
-            python_files = self.list_python_files()
-            if isinstance(python_files, str):
-                # Parse the output to get file paths
-                file_paths = [line.strip() for line in python_files.split('\n') if line.strip() and line.strip().endswith('.py')]
-            else:
-                file_paths = []
-            
-            total_functions = 0
-            for file_path in file_paths[:10]:  # Limit to first 10 files to avoid performance issues
-                try:
-                    content = self.get_file_content(file_path)
-                    if content and not content.startswith('Error'):
-                        # Count function definitions
-                        function_count = len(re.findall(r'^\s*def\s+\w+', content, re.MULTILINE))
-                        class_method_count = len(re.findall(r'^\s+def\s+\w+', content, re.MULTILINE))
-                        total_functions += function_count + class_method_count
+                    test_file, test_func = test_func_name.split(" - ")
                 except:
                     continue
-            
-            return max(total_functions, 1)  # Ensure at least 1 to avoid division by zero
-            
-        except Exception:
-            return 100  # Fallback default
-    
-    def _estimate_covered_functions(self, test_functions: list) -> int:
-        """Estimate how many functions are covered by tests"""
-        if not test_functions:
-            return 0
-        
-        covered_estimate = 0
-        
-        for test in test_functions:
-            if 'error' in test:
-                continue
-            
-            # Base coverage per test
-            base_coverage = 1
-            
-            # Bonus coverage for assertions
-            assertion_bonus = min(test.get('assertions_found', 0) * 0.5, 5)
-            
-            # Bonus coverage for complexity
-            complexity_bonus = {
-                'low': 1,
-                'medium': 2,
-                'high': 3
-            }.get(test.get('test_complexity', 'low'), 1)
-            
-            # Bonus coverage for scope
-            scope_bonus = min(len(test.get('coverage_scope', [])) * 0.3, 3)
-            
-            covered_estimate += base_coverage + assertion_bonus + complexity_bonus + scope_bonus
-        
-        return int(covered_estimate)
-    
-    def _format_coverage_report(self, coverage_analysis: dict) -> str:
-        """Format the coverage analysis into a readable report"""
-        report = []
-        report.append("=" * 60)
-        report.append("TEST COVERAGE ANALYSIS REPORT")
-        report.append("=" * 60)
-        
-        # Summary
-        report.append(f"\n📊 COVERAGE SUMMARY:")
-        report.append(f"   Total Tests: {coverage_analysis['total_tests']}")
-        report.append(f"   Successful Tests: {coverage_analysis['successful_tests']}")
-        report.append(f"   Total Functions: {coverage_analysis['total_functions']}")
-        report.append(f"   Covered Functions: {coverage_analysis['covered_functions']}")
-        report.append(f"   Coverage Percentage: {coverage_analysis['coverage_percentage']:.1f}%")
-        
-        # Test Details
-        report.append(f"\n🧪 TEST FUNCTION DETAILS:")
-        for i, test in enumerate(coverage_analysis['test_functions'], 1):
-            report.append(f"\n   {i}. {test['test_function']}")
-            
-            if 'error' in test:
-                report.append(f"      ❌ Error: {test['error']}")
-            else:
-                report.append(f"      📁 File: {test.get('file_path', 'Unknown')}")
-                report.append(f"      🔍 Function: {test.get('function_name', 'Unknown')}")
-                report.append(f"      ✅ Assertions: {test.get('assertions_found', 0)}")
-                report.append(f"      🎯 Complexity: {test.get('test_complexity', 'Unknown')}")
-                
-                scope = test.get('coverage_scope', [])
-                if scope:
-                    report.append(f"      📋 Coverage Scope:")
-                    for item in scope[:5]:  # Limit to first 5 items
-                        report.append(f"         • {item}")
-                    if len(scope) > 5:
-                        report.append(f"         ... and {len(scope) - 5} more items")
-        
-        # Recommendations
-        report.append(f"\n💡 RECOMMENDATIONS:")
-        if coverage_analysis['coverage_percentage'] < 50:
-            report.append("   ⚠️  Coverage is low. Consider adding more tests.")
-        elif coverage_analysis['coverage_percentage'] < 80:
-            report.append("   ✅ Good test coverage achieved!")
-        
-        if coverage_analysis['total_tests'] == 0:
-            report.append("   ❌ No tests found. Consider creating test functions.")
-        elif coverage_analysis['successful_tests'] < coverage_analysis['total_tests']:
-            report.append("   ⚠️  Some tests have errors. Review and fix failing tests.")
-        
-        report.append("\n" + "=" * 60)
-        
-        return "\n".join(report)
-    
-    def get_enhanced_test_coverage(self, test_func_names: List[str]) -> dict:
-        """Get enhanced test coverage analysis with additional metrics"""
-        try:
-            # Get basic coverage analysis
-            basic_coverage = self.analyze_test_coverage(test_func_names)
-            
-            # Parse the basic coverage to extract metrics
-            coverage_data = self._parse_coverage_report(basic_coverage)
-            
-            # Add enhanced metrics
-            enhanced_metrics = {
-                'basic_coverage': basic_coverage,
-                'parsed_metrics': coverage_data,
-                'quality_score': self._calculate_test_quality_score(coverage_data),
-                'maintainability_index': self._calculate_maintainability_index(coverage_data),
-                'risk_assessment': self._assess_test_risk(coverage_data),
-                'improvement_suggestions': self._generate_improvement_suggestions(coverage_data)
-            }
-            
-            return enhanced_metrics
-            
-        except Exception as e:
-            return {
-                'error': f"Enhanced coverage analysis failed: {e}",
-                'basic_coverage': "Error occurred during analysis"
-            }
-    
-    def _parse_coverage_report(self, coverage_report: str) -> dict:
-        """Parse the coverage report to extract structured data"""
-        try:
-            # Extract key metrics using regex
-            total_tests_match = re.search(r'Total Tests:\s*(\d+)', coverage_report)
-            total_functions_match = re.search(r'Total Functions:\s*(\d+)', coverage_report)
-            covered_functions_match = re.search(r'Covered Functions:\s*(\d+)', coverage_report)
-            coverage_percentage_match = re.search(r'Coverage Percentage:\s*([\d.]+)%', coverage_report)
-            
-            return {
-                'total_tests': int(total_tests_match.group(1)) if total_tests_match else 0,
-                'total_functions': int(total_functions_match.group(1)) if total_functions_match else 0,
-                'covered_functions': int(covered_functions_match.group(1)) if covered_functions_match else 0,
-                'coverage_percentage': float(coverage_percentage_match.group(1)) if coverage_percentage_match else 0.0
-            }
-        except Exception:
-            return {
-                'total_tests': 0,
-                'total_functions': 0,
-                'covered_functions': 0,
-                'coverage_percentage': 0.0
-            }
-    
-    def _calculate_test_quality_score(self, metrics: dict) -> float:
-        """Calculate a quality score for the test suite (0-100)"""
-        try:
-            # Base score from coverage percentage
-            base_score = metrics.get('coverage_percentage', 0)
-            
-            # Bonus for having tests
-            test_bonus = min(metrics.get('total_tests', 0) * 2, 20)
-            
-            # Penalty for low coverage
-            coverage_penalty = 0
-            if metrics.get('coverage_percentage', 0) < 50:
-                coverage_penalty = 20
-            elif metrics.get('coverage_percentage', 0) < 80:
-                coverage_penalty = 10
-            
-            quality_score = base_score + test_bonus - coverage_penalty
-            return max(0, min(100, quality_score))  # Clamp between 0-100
-            
-        except Exception:
-            return 0.0
-    
-    def _calculate_maintainability_index(self, metrics: dict) -> str:
-        """Calculate maintainability index for the test suite"""
-        try:
-            quality_score = self._calculate_test_quality_score(metrics)
-            
-            if quality_score >= 80:
-                return "Excellent"
-            elif quality_score >= 60:
-                return "Good"
-            elif quality_score >= 40:
-                return "Fair"
-            else:
-                return "Poor"
-                
-        except Exception:
-            return "Unknown"
-    
-    def _assess_test_risk(self, metrics: dict) -> dict:
-        """Assess risk level of the current test coverage"""
-        try:
-            risk_level = "Low"
-            risk_factors = []
-            
-            if metrics.get('coverage_percentage', 0) < 50:
-                risk_level = "High"
-                risk_factors.append("Very low test coverage")
-            elif metrics.get('coverage_percentage', 0) < 80:
-                risk_level = "Medium"
-                risk_factors.append("Moderate test coverage")
-            
-            if metrics.get('total_tests', 0) == 0:
-                risk_level = "Critical"
-                risk_factors.append("No tests exist")
-            
-            if metrics.get('total_tests', 0) < 5:
-                risk_factors.append("Very few tests")
-            
-            return {
-                'risk_level': risk_level,
-                'risk_factors': risk_factors,
-                'recommendation': self._get_risk_recommendation(risk_level)
-            }
-            
-        except Exception:
-            return {
-                'risk_level': "Unknown",
-                'risk_factors': ["Unable to assess risk"],
-                'recommendation': "Review test coverage manually"
-            }
-    
-    def _get_risk_recommendation(self, risk_level: str) -> str:
-        """Get recommendation based on risk level"""
-        recommendations = {
-            "Critical": "Immediate action required. Create comprehensive test suite.",
-            "High": "High priority. Significantly increase test coverage.",
-            "Medium": "Moderate priority. Improve test coverage gradually.",
-            "Low": "Maintain current test coverage. Consider edge case testing."
-        }
-        return recommendations.get(risk_level, "Review and improve as needed.")
-    
-    def _generate_improvement_suggestions(self, metrics: dict) -> list:
-        """Generate specific improvement suggestions"""
-        suggestions = []
-        
-        if metrics.get('coverage_percentage', 0) < 50:
-            suggestions.append("Focus on core functionality testing first")
-            suggestions.append("Add unit tests for critical functions")
-            suggestions.append("Implement integration tests for key workflows")
-        
-        if metrics.get('total_tests', 0) < 10:
-            suggestions.append("Create test templates for common scenarios")
-            suggestions.append("Establish testing patterns and conventions")
-            suggestions.append("Prioritize testing for most-used features")
-        
-        if metrics.get('coverage_percentage', 0) < 80:
-            suggestions.append("Add edge case testing")
-            suggestions.append("Implement error condition testing")
-            suggestions.append("Consider performance testing for critical paths")
-        
-        if not suggestions:
-            suggestions.append("Maintain current testing standards")
-            suggestions.append("Consider adding specialized tests (performance, security)")
-            suggestions.append("Review test execution time and optimize if needed")
-        
-        return suggestions
-    
-    @tool
-    def get_enhanced_test_coverage(self, test_func_names: List[str]) -> str:
-        '''
-        Get enhanced test coverage analysis with additional metrics
-        Arguments:
-            test_func_names: List of test function names with file paths
-        Output:
-            Enhanced coverage report with quality metrics, risk assessment, and improvement suggestions
-        '''
-        try:
-            # Get basic coverage analysis
-            basic_coverage = self.analyze_test_coverage(test_func_names)
-            
-            # Parse the basic coverage to extract metrics
-            coverage_data = self._parse_coverage_report(basic_coverage)
-            
-            # Add enhanced metrics
-            enhanced_metrics = {
-                'basic_coverage': basic_coverage,
-                'parsed_metrics': coverage_data,
-                'quality_score': self._calculate_test_quality_score(coverage_data),
-                'maintainability_index': self._calculate_maintainability_index(coverage_data),
-                'risk_assessment': self._assess_test_risk(coverage_data),
-                'improvement_suggestions': self._generate_improvement_suggestions(coverage_data)
-            }
-            
-            # Format the enhanced report
-            return self._format_enhanced_coverage_report(enhanced_metrics)
-            
-        except Exception as e:
-            return f"Enhanced coverage analysis failed: {e}"
-    
-    def _format_enhanced_coverage_report(self, enhanced_metrics: dict) -> str:
-        """Format the enhanced coverage report"""
-        try:
-            report = []
-            report.append("=" * 80)
-            report.append("ENHANCED TEST COVERAGE ANALYSIS REPORT")
-            report.append("=" * 80)
-            
-            # Basic metrics
-            metrics = enhanced_metrics.get('parsed_metrics', {})
-            report.append(f"\n📊 BASIC METRICS:")
-            report.append(f"   Total Tests: {metrics.get('total_tests', 0)}")
-            report.append(f"   Total Functions: {metrics.get('total_functions', 0)}")
-            report.append(f"   Covered Functions: {metrics.get('covered_functions', 0)}")
-            report.append(f"   Coverage Percentage: {metrics.get('coverage_percentage', 0):.1f}%")
-            
-            # Quality metrics
-            report.append(f"\n🎯 QUALITY METRICS:")
-            report.append(f"   Quality Score: {enhanced_metrics.get('quality_score', 0):.1f}/100")
-            report.append(f"   Maintainability Index: {enhanced_metrics.get('maintainability_index', 'Unknown')}")
-            
-            # Risk assessment
-            risk = enhanced_metrics.get('risk_assessment', {})
-            report.append(f"\n⚠️  RISK ASSESSMENT:")
-            report.append(f"   Risk Level: {risk.get('risk_level', 'Unknown')}")
-            if risk.get('risk_factors'):
-                report.append(f"   Risk Factors:")
-                for factor in risk.get('risk_factors', []):
-                    report.append(f"      • {factor}")
-            report.append(f"   Recommendation: {risk.get('recommendation', 'None')}")
-            
-            # Improvement suggestions
-            suggestions = enhanced_metrics.get('improvement_suggestions', [])
-            if suggestions:
-                report.append(f"\n💡 IMPROVEMENT SUGGESTIONS:")
-                for i, suggestion in enumerate(suggestions, 1):
-                    report.append(f"   {i}. {suggestion}")
-            
-            # Basic coverage report
-            report.append(f"\n📋 DETAILED COVERAGE REPORT:")
-            report.append("-" * 60)
-            basic_coverage = enhanced_metrics.get('basic_coverage', 'No coverage data available')
-            report.append(basic_coverage)
-            
-            report.append("\n" + "=" * 80)
-            return "\n".join(report)
-            
-        except Exception as e:
-            return f"Failed to format enhanced report: {e}"
 
+                if len(source_files)==0:
+                    report=analyzer.get_functions_called_by_test(test_file, test_func)
+                    report_str+=f"Functions called by {test_func_name}:\n"
+                    for func in report['direct_calls']:
+                        report_str+=f"  - {func}\n"
+                    for func in report['method_calls']:
+                        report_str+=f"  - {func}\n"
+                else:
+                    report=analyzer.generate_test_function_report(test_file, test_func)
+                    report_str+=analyzer.print_test_function_report(report)
+            
+            return report_str
+
+
+        except Exception as e:
+            raise ToolManager.Error(ToolManager.Error.ErrorType.TEST_COVERAGE_ERROR.name, 
+                                  f"Test coverage analysis failed: {e}")
+    
     @tool
     def analyze_dependencies(self, file_path: str) -> str:
         '''
-        Analyze dependencies of a file to understand impact of changes
+        Analyze dependencies of a file with other files to understand impact of changes
         Arguments:
             file_path: Path to the file to analyze
         Output:
-            List of dependencies and dependent files
+            dict with keys:
+                imports: list of files that are imported by the file_path
+                exporters: list of files that import the file_path
         '''
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -3204,7 +3200,6 @@ class ToolManager:
             dependencies = {
                 'imports': [],
                 'exporters': [],
-                'callers': []
             }
             
             # Find imports
@@ -3236,53 +3231,15 @@ class ToolManager:
             Git history analysis with commit messages and changes
         '''
         try:
-            result = subprocess.run(["git", "log", commit_range, "--pretty=format:%H%n%an%n%ad%n%s%n%b", "--", file_path],
+            result = subprocess.run(["git", "log", commit_range, "--", file_path],
                                   capture_output=True, text=True, check=True)
-            commits = result.stdout.split("\n\n")
-            analysis = []
-            
-            for commit in commits:
-                lines = commit.split("\n")
-                if len(lines) >= 4:
-                    analysis.append(f"Commit: {lines[0]}")
-                    analysis.append(f"Author: {lines[1]}")
-                    analysis.append(f"Date: {lines[2]}")
-                    analysis.append(f"Message: {lines[3]}")
-                    analysis.append("-" * 50)
+            analysis = result.stdout
             
             return "\n".join(analysis) if analysis else "No git history found for this file"
         except Exception as e:
             raise ToolManager.Error(ToolManager.Error.ErrorType.GIT_HISTORY_ERROR.name, 
                                   f"Git history analysis failed: {e}")
-    
-    @tool
-    def get_code_quality_metrics(self, file_path: str) -> str:
-        '''
-        Calculate code quality metrics for a file
-        Arguments:
-            file_path: Path to the file to analyze
-        Output:
-            Code quality metrics including cyclomatic complexity, maintainability index, etc.
-        '''
-        try:
-            # Use radon for code complexity analysis
-            result = subprocess.run(["radon", "cc", "-s", file_path], 
-                                  capture_output=True, text=True, check=True)
-            
-            metrics = {
-                "cyclomatic_complexity": result.stdout,
-                "maintainability_index": "N/A",
-                "halstead_metrics": "N/A"
-            }
-            
-            # Add maintainability index analysis if needed
-            # Add halstead metrics analysis if needed
-            
-            return json.dumps(metrics, indent=2)
-        except Exception as e:
-            raise ToolManager.Error(ToolManager.Error.ErrorType.CODE_QUALITY_ERROR.name, 
-                                  f"Code quality metrics failed: {e}")
-    
+     
     @tool
     def validate_solution(self, file_path: str, test_func_names: List[str]) -> str:
         '''
@@ -3295,7 +3252,8 @@ class ToolManager:
         '''
         try:
             # Run tests against the specific file
-            result = subprocess.run(["python", "-m", "pytest", "-v", "-k"] + test_func_names, 
+            tests=[t.replace(' - ', '::') for t in test_func_names]
+            result = subprocess.run(["python", "-m", "pytest", "-v"] + tests, 
                                   capture_output=True, text=True, check=True)
             
             # Parse test results
@@ -3343,59 +3301,7 @@ class ToolManager:
         except Exception as e:
             raise ToolManager.Error(ToolManager.Error.ErrorType.SOLUTION_COMPARISON_ERROR.name, 
                                   f"Solution comparison failed: {e}")
-    
-    @tool
-    def propose_solutions(self, problem_statement: str, context: dict = None) -> str:
-        '''
-        Propose multiple solutions to a problem with analysis
-        Arguments:
-            problem_statement: The problem to solve
-            context: Optional context information
-        Output:
-            Multiple proposed solutions with analysis
-        '''
-        try:
-            # Analyze the problem
-            analysis = self.enhanced_problem_analysis(problem_statement)
-            
-            # Generate solution proposals
-            solutions = []
-            
-            # Solution 1: Direct approach
-            solutions.append({
-                'type': 'direct',
-                'description': 'Direct fix addressing the immediate issue',
-                'pros': ['Quick to implement', 'Minimal changes'],
-                'cons': ['May not address root cause', 'Limited scalability']
-            })
-            
-            # Solution 2: Comprehensive approach
-            solutions.append({
-                'type': 'comprehensive',
-                'description': 'Comprehensive solution addressing root causes',
-                'pros': ['Addresses root cause', 'More maintainable'],
-                'cons': ['More complex', 'Longer implementation time']
-            })
-            
-            # Solution 3: Pattern-based approach
-            solutions.append({
-                'type': 'pattern',
-                'description': 'Solution based on established patterns',
-                'pros': ['Proven approach', 'Follows best practices'],
-                'cons': ['May be overkill', 'Less innovative']
-            })
-            
-            result = {
-                'problem_analysis': analysis,
-                'proposed_solutions': solutions,
-                'recommendation': 'Evaluate based on project constraints and timeline'
-            }
-            
-            return json.dumps(result, indent=2)
-            
-        except Exception as e:
-            raise ToolManager.Error(ToolManager.Error.ErrorType.UNKNOWN.name, 
-                                  f"Solution proposal failed: {e}")
+
     
     @tool        
     def detect_code_smells(self, file_path: str) -> str:
@@ -3433,119 +3339,7 @@ class ToolManager:
             raise ToolManager.Error(ToolManager.Error.ErrorType.CODE_SMELL_DETECTION_ERROR.name, 
                                   f"Code smell detection failed: {e}")
     
-    @tool
-    def execute_self_consistency_analysis(self, problem_statement: str, context: dict = None) -> str:
-        '''
-        Execute self-consistency algorithm for +25% accuracy improvement
-        Arguments:
-            problem_statement: The problem to analyze with multiple reasoning paths
-            context: Optional context information for the problem
-        Output:
-            Consensus analysis with recommended approach and confidence scores
-        '''
-        try:
-            # Initialize self-consistency engine
-            sc_engine = SelfConsistency(num_paths=5, consensus_threshold=0.6)
-            
-            # Execute with consensus
-            results = sc_engine.execute_with_consensus(problem_statement, context)
-            
-            # Get summary
-            summary = sc_engine.get_consensus_summary()
-            
-            return f"{summary}\n\nDetailed Results:\n{json.dumps(results, indent=2)}"
-            
-        except Exception as e:
-            raise ToolManager.Error(ToolManager.Error.ErrorType.UNKNOWN.name, 
-                                  f"Self-consistency analysis failed: {e}")
     
-    @tool
-    def execute_intelligent_search(self, problem_statement: str, fusion_method: str = "weighted") -> str:
-        '''
-        Execute intelligent search algorithm for +15% accuracy improvement
-        Arguments:
-            problem_statement: The problem to search for with multiple strategies
-            fusion_method: Search result fusion method (weighted, consensus, simple)
-        Output:
-            Comprehensive search results with fused findings and recommendations
-        '''
-        try:
-            # Initialize intelligent search engine
-            is_engine = IntelligentSearch(fusion_method=fusion_method)
-            
-            # Execute intelligent search
-            results = is_engine.execute_intelligent_search(problem_statement, self)
-            
-            # Get summary
-            summary = is_engine.get_search_summary()
-            
-            return f"{summary}\n\nDetailed Results:\n{json.dumps(results, indent=2)}"
-            
-        except Exception as e:
-            raise ToolManager.Error(ToolManager.Error.ErrorType.UNKNOWN.name, 
-                                  f"Intelligent search failed: {e}")
-    
-    @tool
-    def enhanced_problem_analysis(self, problem_statement: str) -> str:
-        '''
-        Enhanced problem analysis combining self-consistency and intelligent search
-        Arguments:
-            problem_statement: The problem to analyze comprehensively
-        Output:
-            Combined analysis with consensus and search results for maximum accuracy
-        '''
-        try:
-            # Step 1: Self-Consistency Analysis
-            sc_engine = SelfConsistency(num_paths=5, consensus_threshold=0.6)
-            sc_results = sc_engine.execute_with_consensus(problem_statement)
-            
-            # Step 2: Intelligent Search
-            is_engine = IntelligentSearch(fusion_method="weighted")
-            is_results = is_engine.execute_intelligent_search(problem_statement, self)
-            
-            # Step 3: Combine and analyze
-            combined_analysis = {
-                'self_consistency': {
-                    'consensus_reached': sc_results.get('consensus_reached', False),
-                    'confidence_score': sc_results.get('confidence_score', 0.0),
-                    'recommended_approach': sc_results.get('recommended_approach', 'unknown')
-                },
-                'intelligent_search': {
-                    'total_findings': is_results.get('total_findings', 0),
-                    'recommended_strategy': is_results.get('recommended_strategy', 'semantic'),
-                    'context_analysis': is_results.get('context_analysis', {})
-                },
-                'combined_confidence': (sc_results.get('confidence_score', 0.0) + 
-                                      is_results.get('fused_results', {}).get('confidence_score', 0.0)) / 2,
-                'accuracy_improvement': 'Estimated +40% (25% from consensus + 15% from intelligent search)'
-            }
-            
-            # Generate comprehensive summary
-            summary = "🎯 Enhanced Problem Analysis Results\n"
-            summary += "=" * 50 + "\n\n"
-            
-            # Self-Consistency Summary
-            summary += "🧠 Self-Consistency Analysis:\n"
-            summary += f"   Consensus: {'✅ Reached' if combined_analysis['self_consistency']['consensus_reached'] else '❌ Not Reached'}\n"
-            summary += f"   Confidence: {combined_analysis['self_consistency']['confidence_score']:.1%}\n"
-            summary += f"   Approach: {combined_analysis['self_consistency']['recommended_approach']}\n\n"
-            
-            # Intelligent Search Summary
-            summary += "🔍 Intelligent Search Analysis:\n"
-            summary += f"   Total Findings: {combined_analysis['intelligent_search']['total_findings']}\n"
-            summary += f"   Strategy: {combined_analysis['intelligent_search']['recommended_strategy']}\n"
-            summary += f"   Problem Type: {combined_analysis['intelligent_search']['context_analysis'].get('problem_type', 'Unknown')}\n\n"
-            
-            # Combined Results
-            summary += "🚀 Combined Results:\n"
-            summary += f"   Overall Confidence: {combined_analysis['combined_confidence']:.1%}\n"
-            summary += f"   Accuracy Improvement: {combined_analysis['accuracy_improvement']}\n"
-            
-            return f"{summary}\n\nDetailed Analysis:\n{json.dumps(combined_analysis, indent=2)}"
-            
-        except Exception as e:
-            raise ToolManager.Error(ToolManager.Error.ErrorType.UNKNOWN.name, 
-                                  f"Enhanced problem analysis failed: {e}")
     
     def save_file(self,file_path: str, content: str)->str:
         '''
@@ -3624,7 +3418,7 @@ class ToolManager:
     def _save(self,file_path: str, content: str)->str:
         is_syntax_error, error = self.check_syntax_error(content)
         if not is_syntax_error:
-            with open(file_path, "w") as file:
+            with open(file_path, "w", encoding="utf-8") as file:
                 file.write(content)
             self.new_files_created.append(file_path)
             return f"File {file_path} saved successfully"
@@ -3681,7 +3475,7 @@ class ToolManager:
                     return "\n".join(lines[start_line - 1:end_line])
 
         raise ToolManager.Error(ToolManager.Error.ErrorType.SEARCH_TERM_NOT_FOUND.name, f"Function '{function_name}' not found in '{file_path}'")
-    def search_in_all_files_content_v2(self, grep_search_command: str, test_files_only: bool = False) -> str:
+    def search_in_all_files_content_with_grep(self, grep_search_command: str, test_files_only: bool = False) -> str:
         '''
         Performs grep search across all files in the codebase
         Arguments:
@@ -4091,7 +3885,7 @@ class ToolManager:
         return Utils.limit_strings("\n\n".join(chunks), n=max_output_lines)
 
     @tool
-    def search_in_specified_file_v2(self,file_path: str, search_term: str)->str:
+    def search_in_specified_file(self,file_path: str, search_term: str)->str:
         '''
         Locates text patterns within a specific file
         Arguments:
@@ -4305,7 +4099,7 @@ class ToolManager:
             logger.error(f"file '{file_path}' does not exist.")
             raise ToolManager.Error(ToolManager.Error.ErrorType.FILE_NOT_FOUND.name,f"Error: file '{file_path}' does not exist.")
         
-        original=self._get_file_content(file_path,limit=-1)
+        original=self._read_file(file_path,limit=-1)
 
         match original.count(search):
             case 0:
@@ -4794,317 +4588,6 @@ class ToolManager:
                 f"Parallel file operations failed: {e}"
             )
     
-    @tool
-    def get_performance_metrics(self) -> str:
-        '''
-        Get performance metrics from parallel operations
-        Arguments:
-            None
-        Output:
-            Performance summary and metrics
-        '''
-        try:
-            performance_summary = self.performance_monitor.get_performance_summary()
-            return performance_summary
-        except Exception as e:
-            return f"Error getting performance metrics: {e}"
-    
-    @tool
-    def get_smart_performance_analysis(self) -> str:
-        '''
-        Get intelligent performance analysis with recommendations
-        Arguments:
-            None
-        Output:
-            Detailed performance analysis with optimization suggestions
-        '''
-        try:
-            # Collect comprehensive performance data
-            perf_data = {
-                'performance_monitor': {
-                    'summary': self.performance_monitor.get_performance_summary(),
-                    'cached_results': len(self.performance_monitor.cache),
-                    'total_operations': sum(len(times) for times in self.performance_monitor.metrics.values())
-                },
-                'cache_efficiency': self.cache.get_stats(),
-                'tool_usage': {
-                    'total_invocations': sum(self.tool_invocations.values()),
-                    'failure_rate': {k: sum(v.values()) for k, v in self.tool_failure.items()},
-                    'most_used_tools': sorted(self.tool_invocations.items(), key=lambda x: x[1], reverse=True)[:5]
-                }
-            }
-            
-            # Generate intelligent recommendations
-            recommendations = []
-            
-            # Check for performance bottlenecks
-            slow_operations = []
-            for op, times in self.performance_monitor.metrics.items():
-                if times:
-                    avg_time = sum(times) / len(times)
-                    if avg_time > 10:  # Operations taking more than 10 seconds on average
-                        slow_operations.append((op, avg_time))
-            
-            if slow_operations:
-                recommendations.append("🚨 Performance Bottlenecks Detected:")
-                for op, avg_time in slow_operations[:3]:
-                    recommendations.append(f"   - {op}: {avg_time:.2f}s average")
-                recommendations.append("   Consider optimizing these operations or implementing caching")
-            
-            # Check cache efficiency
-            cache_stats = self.cache.get_stats()
-            if cache_stats['total_entries'] > 100:
-                recommendations.append("📊 Cache size is large - consider adjusting TTL or implementing cache eviction")
-            
-            # Check tool failure patterns
-            high_failure_tools = []
-            for tool, failures in self.tool_failure.items():
-                total_failures = sum(failures.values())
-                if total_failures > 5:
-                    high_failure_tools.append((tool, total_failures))
-            
-            if high_failure_tools:
-                recommendations.append("⚠️ High Failure Rate Tools:")
-                for tool, failures in high_failure_tools[:3]:
-                    recommendations.append(f"   - {tool}: {failures} failures")
-                recommendations.append("   Review error handling and retry logic for these tools")
-            
-            # Add general optimization suggestions
-            recommendations.extend([
-                "💡 General Optimization Tips:",
-                "   - Use parallel execution for independent operations",
-                "   - Implement caching for frequently accessed data",
-                "   - Monitor timeout settings for long-running operations",
-                "   - Consider batch processing for multiple similar operations"
-            ])
-            
-            # Compile final report
-            analysis_report = {
-                'performance_data': perf_data,
-                'recommendations': recommendations,
-                'timestamp': time.time(),
-                'analysis_version': '2.0'
-            }
-            
-            return json.dumps(analysis_report, indent=2)
-            
-        except Exception as e:
-            return f"Error getting smart performance analysis: {e}"
-    
-    @tool
-    def get_system_health(self) -> str:
-        '''
-        Get comprehensive system health status
-        Arguments:
-            None
-        Output:
-            System health report including resource usage and performance metrics
-        '''
-        try:
-            health_report = {
-                'timestamp': time.time(),
-                'system_status': 'operational',
-                'components': {}
-            }
-            
-            # Check cache health
-            cache_stats = self.cache.get_stats()
-            health_report['components']['cache'] = {
-                'status': 'healthy' if cache_stats['total_entries'] < 1000 else 'warning',
-                'entries': cache_stats['total_entries'],
-                'size_mb': cache_stats['cache_size_mb'],
-                'most_accessed': cache_stats['most_accessed'][:3]
-            }
-            
-            # Check performance monitor
-            perf_summary = self.performance_monitor.get_performance_summary()
-            health_report['components']['performance_monitor'] = {
-                'status': 'healthy',
-                'total_metrics': len(self.performance_monitor.metrics),
-                'cached_results': len(self.performance_monitor.cache)
-            }
-            
-            # Check tool health
-            total_invocations = sum(self.tool_invocations.values())
-            total_failures = sum(sum(failures.values()) for failures in self.tool_failure.values())
-            failure_rate = (total_failures / total_invocations * 100) if total_invocations > 0 else 0
-            
-            health_report['components']['tools'] = {
-                'status': 'healthy' if failure_rate < 10 else 'warning' if failure_rate < 25 else 'critical',
-                'total_invocations': total_invocations,
-                'total_failures': total_failures,
-                'failure_rate_percent': round(failure_rate, 2)
-            }
-            
-            # Overall system status
-            component_statuses = [comp['status'] for comp in health_report['components'].values()]
-            if 'critical' in component_statuses:
-                health_report['system_status'] = 'critical'
-            elif 'warning' in component_statuses:
-                health_report['system_status'] = 'warning'
-            
-            return json.dumps(health_report, indent=2)
-            
-        except Exception as e:
-            return f"Error getting system health: {e}"
-    
-    @tool
-    def clear_cache(self, cache_type: str = "all") -> str:
-        '''
-        Clear cached data to free up memory
-        Arguments:
-            cache_type: Type of cache to clear ("all", "tool_cache", "performance_cache", "smart_cache")
-        Output:
-            Confirmation message with cache clearing results
-        '''
-        try:
-            cleared_items = 0
-            
-            if cache_type in ["all", "smart_cache"]:
-                cleared_items += len(self.cache.cache)
-                self.cache.cache.clear()
-                self.cache.access_count.clear()
-                self.cache.last_cleanup = time.time()
-            
-            if cache_type in ["all", "performance_cache"]:
-                cleared_items += len(self.performance_monitor.cache)
-                self.performance_monitor.cache.clear()
-            
-            if cache_type in ["all", "tool_cache"]:
-                # Clear any tool-specific caches if they exist
-                pass
-            
-            return f"✅ Successfully cleared {cache_type} cache. Removed {cleared_items} cached items."
-            
-        except Exception as e:
-            return f"Error clearing cache: {e}"
-    
-    @tool
-    def get_cache_stats(self) -> str:
-        '''
-        Get detailed cache statistics and usage information
-        Arguments:
-            None
-        Output:
-            Comprehensive cache statistics including hit rates and memory usage
-        '''
-        try:
-            cache_stats = {
-                'smart_cache': self.cache.get_stats(),
-                'performance_cache': {
-                    'total_entries': len(self.performance_monitor.cache),
-                    'size_estimate_mb': sum(len(str(v)) for v in self.performance_monitor.cache.values()) / (1024 * 1024)
-                },
-                'summary': {
-                    'total_cached_items': len(self.cache.cache) + len(self.performance_monitor.cache),
-                    'estimated_memory_mb': self.cache.get_stats()['cache_size_mb'] + 
-                                         sum(len(str(v)) for v in self.performance_monitor.cache.values()) / (1024 * 1024)
-                }
-            }
-            
-            return json.dumps(cache_stats, indent=2)
-            
-        except Exception as e:
-            return f"Error getting cache stats: {e}"
-    
-    @tool
-    def analyze_code_patterns(self, file_path: str, pattern_type: str = "general") -> str:
-        '''
-        Analyze code patterns and provide insights
-        Arguments:
-            file_path: Path to the file to analyze
-            pattern_type: Type of pattern analysis ("general", "performance", "security", "maintainability")
-        Output:
-            Code pattern analysis with recommendations
-        '''
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            analysis = {
-                'file_path': file_path,
-                'pattern_type': pattern_type,
-                'patterns_found': [],
-                'recommendations': [],
-                'metrics': {}
-            }
-            
-            # General pattern analysis
-            if pattern_type in ["general", "all"]:
-                # Count lines of code
-                lines = content.splitlines()
-                analysis['metrics']['total_lines'] = len(lines)
-                analysis['metrics']['non_empty_lines'] = len([line for line in lines if line.strip()])
-                
-                # Function and class counts
-                tree = ast.parse(content)
-                functions = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
-                classes = [node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
-                
-                analysis['metrics']['functions'] = len(functions)
-                analysis['metrics']['classes'] = len(classes)
-                
-                # Check for long functions
-                long_functions = []
-                for func in functions:
-                    if hasattr(func, 'end_lineno') and func.end_lineno:
-                        func_length = func.end_lineno - func.lineno
-                        if func_length > 50:
-                            long_functions.append((func.name, func_length))
-                
-                if long_functions:
-                    analysis['patterns_found'].append(f"Long functions detected: {len(long_functions)}")
-                    analysis['recommendations'].append("Consider breaking down long functions into smaller, more focused functions")
-            
-            # Performance pattern analysis
-            if pattern_type in ["performance", "all"]:
-                # Check for potential performance issues
-                if 'for' in content and 'in' in content:
-                    analysis['patterns_found'].append("Loop constructs found - check for optimization opportunities")
-                
-                if re.search(r'\.append\s*\(.*\)', content):
-                    analysis['patterns_found'].append("List append operations found - consider list comprehensions for better performance")
-                
-                if 'import' in content:
-                    imports = re.findall(r'^import\s+(\w+)', content, re.MULTILINE)
-                    from_imports = re.findall(r'^from\s+(\w+)', content, re.MULTILINE)
-                    total_imports = len(imports) + len(from_imports)
-                    analysis['metrics']['import_count'] = total_imports
-                    
-                    if total_imports > 20:
-                        analysis['recommendations'].append("High number of imports - consider organizing imports and removing unused ones")
-            
-            # Security pattern analysis
-            if pattern_type in ["security", "all"]:
-                security_patterns = [
-                    (r'eval\s*\(', "eval() usage detected - potential security risk"),
-                    (r'exec\s*\(', "exec() usage detected - potential security risk"),
-                    (r'subprocess\.(call|run|Popen)', "subprocess usage detected - ensure input validation"),
-                    (r'open\s*\([^)]*["\']w', "File write operations detected - ensure proper permissions")
-                ]
-                
-                for pattern, message in security_patterns:
-                    if re.search(pattern, content):
-                        analysis['patterns_found'].append(message)
-            
-            # Maintainability pattern analysis
-            if pattern_type in ["maintainability", "all"]:
-                # Check for magic numbers
-                magic_numbers = re.findall(r'\b\d{2,}\b', content)
-                if len(magic_numbers) > 5:
-                    analysis['patterns_found'].append(f"Magic numbers detected: {len(magic_numbers)}")
-                    analysis['recommendations'].append("Consider defining constants for magic numbers")
-                
-                # Check for complex expressions
-                if re.search(r'[^=]=.*[+\-*/].*[+\-*/].*[+\-*/]', content):
-                    analysis['patterns_found'].append("Complex expressions detected")
-                    analysis['recommendations'].append("Consider breaking complex expressions into intermediate variables")
-            
-            return json.dumps(analysis, indent=2)
-            
-        except Exception as e:
-            return f"Error analyzing code patterns: {e}"
-    
     def _extract_key_terms(self, problem_statement: str) -> List[str]:
         """Extract key terms from problem statement for search"""
         # Simple keyword extraction - could be enhanced with NLP
@@ -5134,9 +4617,7 @@ class ToolManager:
         """Analyze a single file with multiple tools"""
         try:
             return {
-                'content': self.get_file_content(file_path, limit=1000),
-                'smells': self.detect_code_smells(file_path),
-                'quality': self.get_code_quality_metrics(file_path)
+                'content': self.read_file(file_path, limit=1000),
             }
         except Exception as e:
             return {'error': str(e)}
@@ -5170,11 +4651,6 @@ class EnhancedToolManager(ToolManager):
         self.first_run_repo_tests_call = True
         self.can_finish = False
         self.last_run_repo_tests_failure_output = ""
-        # Regression guard state
-        self.baseline_failed_tests = None
-        self.last_failed_tests = []
-        self.regression_guard_enabled = True
-        self._regression_reverting = False
         self.performance_monitor = PerformanceMonitor()
         self.parallel_executor = ParallelToolExecutor(self)
         self.file_searcher = ParallelFileSearcher(self)
@@ -5208,7 +4684,7 @@ class EnhancedToolManager(ToolManager):
         return '\n\n'.join([json.dumps(tool_metadata, ensure_ascii=False) for _,tool_metadata in self.TOOL_LIST.items()])
     
     @ToolManager.tool
-    def get_file_content(self,file_path: str, search_start_line: int = None, search_end_line: int = None, search_term: str = None)->str:
+    def read_file(self,file_path: str, search_start_line: int = None, search_end_line: int = None, search_term: str = None)->str:
        
         '''
         Retrieves file contents with optional filtering based on search term and line numbers
@@ -5220,7 +4696,7 @@ class EnhancedToolManager(ToolManager):
         '''
         if file_path in self.blacklisted_test_files:
             return "You can't use this file, search other files"
-        return self._get_file_content(file_path,search_start_line,search_end_line,search_term,limit=5000)
+        return self._read_file(file_path,search_start_line,search_end_line,search_term,limit=5000)
     
     def save_file(self,file_path: str, content: str)->str:
         '''
@@ -5963,7 +5439,7 @@ class EnhancedToolManager(ToolManager):
             return "ERROR: tests timed out.", False
 
     @ToolManager.tool
-    def search_in_all_files_content_v2(self, grep_search_command: str, test_files_only: bool = False, sort_by_occurrences: bool = True) -> str:
+    def search_in_all_files_content_with_grep(self, grep_search_command: str, test_files_only: bool = False, sort_by_occurrences: bool = True) -> str:
         '''
         Performs grep search across all files in the codebase. Try to search the codebase for distinctive variables, literals, special letters, numbers, characters one by one to not miss any.
         Arguments:
@@ -6004,7 +5480,7 @@ class EnhancedToolManager(ToolManager):
         return output
 
     @ToolManager.tool
-    def search_in_specified_file_v2(self,file_path: str, search_term: str)->str:
+    def search_in_specified_file(self,file_path: str, search_term: str)->str:
         '''
         Locates text patterns within a specific file
         Arguments:
@@ -6177,7 +5653,7 @@ class EnhancedToolManager(ToolManager):
         if "test" in file_path.lower() and "pytest" not in file_path.lower():
             raise ToolManager.Error(ToolManager.Error.ErrorType.INVALID_TOOL_CALL.name,f"Error: You cannot change test files. Try another way.")
         
-        original=self._get_file_content(file_path,limit=-1)
+        original=self._read_file(file_path,limit=-1)
 
         match original.count(search):
             case 0:
@@ -6253,7 +5729,7 @@ class EnhancedToolManager(ToolManager):
         if not self.is_test_func_filtered:
             return "Please filter test functions before you can finish. Call `filter_test_func_names` tool now."
         elif self.is_test_func_filtered and len(self.filtered_test_func_names) == 0:
-            return "No test functions relevant to the issue found. You should find at least one test function relevant to the issue. TRY different searches using `search_in_all_files_content_v2` tool."
+            return "No test functions relevant to the issue found. You should find at least one test function relevant to the issue. TRY different searches using `search_in_all_files_content_with_grep` tool."
         else:
             return "finish"
 
@@ -6330,22 +5806,6 @@ class EnhancedToolManager(ToolManager):
 
                 failed_test_names = self._extract_failed_test_names(output)
 
-            # Update regression baseline and detect newly failing tests
-            try:
-                if self.regression_guard_enabled:
-                    newly_failed = self._update_regression_baseline_and_log(failed_test_names)
-                    # Auto-revert on regression
-                    if newly_failed and not self._regression_reverting:
-                        self.logs.append(f"[REGRESSION GUARD] Auto-reverting due to new regressions: {newly_failed}")
-                        self._regression_reverting = True
-                        try:
-                            revert_msg = self.revert_to_last_checkpoint()
-                            self.logs.append(f"[REGRESSION GUARD] Revert result: {revert_msg}")
-                        finally:
-                            self._regression_reverting = False
-            except Exception as _e:
-                self.logs.append(f"[REGRESSION GUARD] Baseline update error: {_e}")
-
             self.failed_test_names = self.previous_failed_tests + failed_test_names
 
             # update test files to test them all
@@ -6371,22 +5831,6 @@ class EnhancedToolManager(ToolManager):
                 self.logs.append(f"Number of failures: {self.failed_count}")
                 self.can_finish = False
                 self.last_run_repo_tests_failure_output = output
-                # Update regression baseline and detect newly failing tests
-                try:
-                    if self.regression_guard_enabled:
-                        current_failed = self._extract_failed_test_names(output)
-                        newly_failed = self._update_regression_baseline_and_log(current_failed)
-                        # Auto-revert on regression
-                        if newly_failed and not self._regression_reverting:
-                            self.logs.append(f"[REGRESSION GUARD] Auto-reverting due to new regressions: {newly_failed}")
-                            self._regression_reverting = True
-                            try:
-                                revert_msg = self.revert_to_last_checkpoint()
-                                self.logs.append(f"[REGRESSION GUARD] Revert result: {revert_msg}")
-                            finally:
-                                self._regression_reverting = False
-                except Exception as _e:
-                    self.logs.append(f"[REGRESSION GUARD] Baseline update error: {_e}")
                 return output
             
             current_patch = self.get_final_git_patch()
@@ -6402,29 +5846,6 @@ class EnhancedToolManager(ToolManager):
                 self.failed_test_names = None
                 self.failed_count = -1
                 return self.run_repo_tests()   
-
-    # --- Regression guard helper ---
-    def _update_regression_baseline_and_log(self, current_failed: list[str]) -> list[str]:
-        """Capture baseline failing tests once and log any newly failing tests (regressions).
-
-        - On first invocation, records the set of currently failing tests as the baseline.
-        - On subsequent invocations, logs any tests that are newly failing compared to the baseline.
-        """
-        try:
-            current_set = set(current_failed or [])
-            if self.baseline_failed_tests is None:
-                self.baseline_failed_tests = set(current_set)
-                self.logs.append(f"[REGRESSION GUARD] Baseline captured with {len(self.baseline_failed_tests)} failing tests.")
-                self.last_failed_tests = list(current_set)
-                return []
-            regressions = sorted(list(current_set - self.baseline_failed_tests))
-            if regressions:
-                self.logs.append(f"[REGRESSION GUARD] Regression detected: newly failing tests: {regressions}")
-            self.last_failed_tests = list(current_set)
-            return regressions
-        except Exception as e:
-            self.logs.append(f"[REGRESSION GUARD] Error while updating baseline: {e}")
-            return []
     
     @ToolManager.tool
     def apply_code_edit_and_run_repo_tests(self, file_path: str, search: str, replace: str) -> str:
@@ -6654,9 +6075,13 @@ def has_dependency_error_task_process(input_dict: Dict[str, Any], repod_dir: str
         test_func_codes = []
         test_file_paths = []
         for test_func_name in test_func_names:
-            file_path, function_name = test_func_name.split(" - ")
-            function_name = function_name.split(".")[-1]
-            test_func_codes.append(f"```{file_path}\n\n{tool_manager.get_function_body(file_path, function_name)}\n```")
+            try:
+                file_path, function_name = test_func_name.split(" - ")
+                
+                function_name = function_name.split(".")[-1]
+                test_func_codes.append(f"```{file_path}\n\n{tool_manager.get_function_body(file_path, function_name)}\n```")
+            except Exception as e:
+                file_path = test_func_name
             if file_path not in test_file_paths:
                 test_file_paths.append(file_path)
 
@@ -6707,12 +6132,11 @@ def execute_test_patch_find_workflow_v0(problem_statement: str, *, timeout: int,
     cot=COT(latest_observations_to_keep=500)
     tool_manager=ToolManager(
         available_tools=[
-            "search_in_all_files_content_v2",
+            "search_in_all_files_content_with_grep",
             "analyze_test_coverage",
-            "get_enhanced_test_coverage",
             "analyze_dependencies",
-            "get_file_content",
-            "search_in_specified_file_v2",
+            "read_file",
+            "search_in_specified_file",
             "search_recurive_in_all_files_in_directory",
             "test_patch_find_finish",
             "sort_test_func_names",
@@ -6720,13 +6144,6 @@ def execute_test_patch_find_workflow_v0(problem_statement: str, *, timeout: int,
             "parallel_codebase_analysis",
             "parallel_test_discovery",
             "parallel_file_operations",
-            "get_performance_metrics",
-            # 🆕 NEW: Enhanced System Tools
-            "get_system_health",
-            "clear_cache",
-            "get_cache_stats",
-            "analyze_code_patterns",
-            "get_smart_performance_analysis"
         ]
     )
     logger.info(f"[TEST_PATCH_FIND] Starting test patch find agent execution...")
@@ -6832,15 +6249,11 @@ def execute_fix_workflow_v0(problem_statement: str, *, timeout: int, run_id_1: s
     
     tool_manager=ToolManager(
         available_tools=[
-            "search_in_all_files_content_v2",
+            "search_in_all_files_content_with_grep",
             "analyze_test_coverage",
-            "get_enhanced_test_coverage",
             "analyze_dependencies",
-            "detect_code_smells",
             "analyze_git_history",
-            "get_code_quality_metrics",
             "validate_solution",
-            "propose_solutions",
             "compare_solutions",
             "apply_code_edit",
             "grep_replace_once",
@@ -6848,20 +6261,9 @@ def execute_fix_workflow_v0(problem_statement: str, *, timeout: int, run_id_1: s
             "run_repo_tests",  # Added for validation
             "start_over",
             "finish",
-            # 🚀 NEW: Enhanced Accuracy Tools
-            "execute_self_consistency_analysis",
-            "execute_intelligent_search", 
-            "enhanced_problem_analysis",
             "parallel_codebase_analysis",
             "parallel_test_discovery",
             "parallel_file_operations",
-            "get_performance_metrics",
-            # 🆕 NEW: Enhanced System Tools
-            "get_system_health",
-            "clear_cache",
-            "get_cache_stats",
-            "analyze_code_patterns",
-            "get_smart_performance_analysis"
         ],
         test_files=test_file_paths or []
     )
@@ -7235,10 +6637,10 @@ def execute_test_patch_find_workflow_v1(problem_statement: str, *, timeout: int,
         current_retries += 1
         # Build tool manager and prompts
         tool_manager = EnhancedToolManager(available_tools=[
-            "search_in_all_files_content_v2",
+            "search_in_all_files_content_with_grep",
             "analyze_dependencies", 
-            "get_file_content",
-            "search_in_specified_file_v2",
+            "read_file",
+            "search_in_specified_file",
             "search_recurive_in_all_files_in_directory",
             "test_patch_find_finish",
             # "sort_test_func_names",
@@ -7246,7 +6648,6 @@ def execute_test_patch_find_workflow_v1(problem_statement: str, *, timeout: int,
             "parallel_codebase_analysis",
             "parallel_test_discovery",
             "parallel_file_operations",
-            "get_performance_metrics",
         ])
         system_prompt = TEST_PATCH_FIND_SYSTEM_PROMPT_TEMPLATE_V1.format(
             tools_docs=tool_manager.get_tool_docs(), 
@@ -7295,9 +6696,9 @@ def execute_fix_workflow_v1(problem_statement: str, *, timeout: int, run_id_1: s
     # Build tool manager and prompts
     tool_manager = EnhancedToolManager(test_files=test_file_paths, available_tools=[
         "run_repo_tests",
-        "search_in_all_files_content_v2",
-        "get_file_content",
-        "search_in_specified_file_v2",
+        "search_in_all_files_content_with_grep",
+        "read_file",
+        "search_in_specified_file",
         "search_recurive_in_all_files_in_directory",
         "analyze_dependencies",
         "apply_code_edit",
