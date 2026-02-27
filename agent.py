@@ -1,5 +1,3 @@
-# For the success and development of Ridges 
-
 from __future__ import annotations
 import ast
 import json
@@ -24,9 +22,608 @@ import concurrent.futures
 import threading
 from collections import defaultdict
 
-REJECTION_FEEDBACK_PROMPT = f"ERROR: Reject tool call - this exact tool call with same arguments was already attempted {{consecutive_rejections}} times. You're trying the same tool {{next_tool_name}} with identical arguments. This suggests you may be stuck in a loop. Please try a different approach:\n" \
-    "1. Update the arguments or use a different tool entirely\n" \
-    "2. Think differently, and try to use a different approach to solve the problem\n"
+
+class ToolPromptManager:
+    """Manages tool-specific prompts for enhanced LLM reasoning"""
+    
+    def __init__(self):
+        self.tool_prompts = {
+            'get_file_content': self.GET_FILE_CONTENT_PROMPT,
+            'search_in_all_files_content_v2': self.SEARCH_PROMPT,
+            'search_in_specified_file_v2': self.SEARCH_SPECIFIED_PROMPT,
+            'search_recurive_in_all_files_in_directory': self.SEARCH_RECURSIVE_PROMPT,
+            'analyze_dependencies': self.DEPENDENCY_PROMPT,
+            'run_repo_tests': self.TEST_PROMPT,
+            'apply_code_edit': self.EDIT_PROMPT,
+            'apply_code_edit_and_run_repo_tests': self.EDIT_AND_TEST_PROMPT,
+            'analyze_test_coverage': self.COVERAGE_PROMPT,
+            'detect_code_smells': self.SMELLS_PROMPT,
+            'get_code_quality_metrics': self.QUALITY_PROMPT,
+            'analyze_git_history': self.GIT_HISTORY_PROMPT,
+            'get_git_status': self.GIT_STATUS_PROMPT,
+            'get_git_log': self.GIT_LOG_PROMPT,
+            'get_git_branches': self.GIT_BRANCHES_PROMPT,
+            'get_git_diff': self.GIT_DIFF_PROMPT,
+            'filter_test_func_names': self.FILTER_TESTS_PROMPT,
+            'test_patch_find_finish': self.FINISH_PROMPT,
+            'pytest_fix_finish': self.FINISH_PROMPT,
+            'checkpoint_progress': self.CHECKPOINT_PROMPT,
+            'parallel_codebase_analysis': self.PARALLEL_ANALYSIS_PROMPT,
+            'parallel_test_discovery': self.PARALLEL_DISCOVERY_PROMPT,
+            'parallel_file_operations': self.PARALLEL_OPERATIONS_PROMPT,
+            'get_performance_metrics': self.PERFORMANCE_PROMPT,
+        }
+    
+    GET_FILE_CONTENT_PROMPT = textwrap.dedent("""
+    # 📄 File Content Analysis Expert
+    
+    You are analyzing file content to understand code structure and identify issues.
+    
+    **Focus Areas:**
+    - Function and class definitions
+    - Import statements and dependencies
+    - Error patterns and syntax issues
+    - Code logic and flow
+    - Variable usage and scope
+    - Test-related code and assertions
+    
+    **Analysis Guidelines:**
+    1. Identify the main purpose of the file
+    2. Look for potential issues or bugs
+    3. Understand the code structure and architecture
+    4. Note any dependencies or imports
+    5. Identify test-related code if present
+    6. Look for error handling patterns
+    
+    **Next Steps:**
+    Based on your analysis, suggest the most relevant tools to use next for deeper investigation.
+    """)
+    
+    SEARCH_PROMPT = textwrap.dedent("""
+    # 🔍 Code Search and Pattern Analysis Expert
+    
+    You are searching for specific patterns and code elements across the codebase.
+    
+    **Search Strategies:**
+    - Use specific function/class names from the problem
+    - Look for error patterns and messages
+    - Search for test-related code and assertions
+    - Find import and dependency patterns
+    - Identify code smells and anti-patterns
+    - Look for distinctive variables or literals
+    
+    **Pattern Recognition:**
+    1. Identify relevant search terms from the problem statement
+    2. Understand pattern significance and context
+    3. Group related findings by relevance
+    4. Prioritize findings by their connection to the problem
+    
+    **Next Steps:**
+    Based on search results, determine what additional information is needed to solve the problem.
+    """)
+    
+    SEARCH_SPECIFIED_PROMPT = textwrap.dedent("""
+    # 🔍 Targeted File Search Expert
+    
+    You are searching for specific patterns within a particular file.
+    
+    **Search Focus:**
+    - Target specific functions or classes mentioned in the problem
+    - Look for error patterns and exception handling
+    - Find test-related code and assertions
+    - Identify variable usage and assignments
+    - Look for import statements and dependencies
+    
+    **Analysis Approach:**
+    1. Focus on the specific file context
+    2. Identify patterns relevant to the current problem
+    3. Understand the code structure within this file
+    4. Note any issues or inconsistencies
+    
+    **Next Steps:**
+    Based on the file-specific findings, suggest the next most relevant action.
+    """)
+    
+    SEARCH_RECURSIVE_PROMPT = textwrap.dedent("""
+    # 🔍 Recursive Directory Search Expert
+    
+    You are searching for patterns across multiple directories and files.
+    
+    **Search Strategy:**
+    - Use broad patterns to find relevant files
+    - Look for files that might contain the problem
+    - Search for test files and related modules
+    - Find configuration and setup files
+    
+    **Directory Analysis:**
+    1. Understand the project structure
+    2. Identify relevant directories and modules
+    3. Find files that might contain the issue
+    4. Map out the codebase organization
+    
+    **Next Steps:**
+    Based on the directory search results, determine which files to examine more closely.
+    """)
+    
+    DEPENDENCY_PROMPT = textwrap.dedent("""
+    # 🔗 Dependency Analysis Expert
+    
+    You are analyzing file dependencies to understand relationships and impact.
+    
+    **Analysis Focus:**
+    - Import statements and module dependencies
+    - Function and class usage across files
+    - External library dependencies
+    - Internal module relationships
+    - Circular dependency detection
+    
+    **Impact Assessment:**
+    1. Understand what files depend on the target file
+    2. Identify what the target file depends on
+    3. Assess the impact of potential changes
+    4. Look for dependency-related issues
+    
+    **Next Steps:**
+    Based on dependency analysis, determine the safest approach for making changes.
+    """)
+    
+    TEST_PROMPT = textwrap.dedent("""
+    # 🧪 Test Analysis and Execution Expert
+    
+    You are analyzing and executing tests to identify failures and issues.
+    
+    **Test Analysis Focus:**
+    - Test assertions and expected behaviors
+    - Failure messages and error types
+    - Test setup and teardown procedures
+    - Coverage and edge case testing
+    - Test dependencies and requirements
+    
+    **Execution Strategy:**
+    1. Understand the nature of test failures
+    2. Identify root causes of failures
+    3. Plan fixes based on failure analysis
+    4. Validate fixes with test re-execution
+    5. Monitor for regressions
+    
+    **Next Steps:**
+    Based on test results, determine what code changes are needed to fix the failures.
+    """)
+    
+    EDIT_PROMPT = textwrap.dedent("""
+    # ✏️ Code Editing and Fixing Expert
+    
+    You are making precise code changes to fix identified issues.
+    
+    **Editing Principles:**
+    - Make minimal, targeted changes
+    - Preserve existing functionality and behavior
+    - Follow established code style and conventions
+    - Handle edge cases and error conditions properly
+    - Maintain backward compatibility when possible
+    
+    **Change Strategy:**
+    1. Identify the exact location for changes
+    2. Understand the required modification and its impact
+    3. Implement the fix carefully and precisely
+    4. Consider side effects and dependencies
+    5. Ensure the fix addresses the root cause
+    
+    **Next Steps:**
+    After making changes, validate them with appropriate tests to ensure they work correctly.
+    """)
+    
+    EDIT_AND_TEST_PROMPT = textwrap.dedent("""
+    # ✏️🧪 Code Editing and Immediate Testing Expert
+    
+    You are making code changes and immediately testing them to ensure they work.
+    
+    **Combined Strategy:**
+    - Make precise, targeted code changes
+    - Immediately run tests to validate the fix
+    - Iterate quickly if tests still fail
+    - Ensure the fix resolves the original issue
+    
+    **Workflow:**
+    1. Implement the necessary code changes
+    2. Run tests immediately to check the fix
+    3. Analyze test results for any remaining issues
+    4. Make additional adjustments if needed
+    5. Continue until all tests pass
+    
+    **Next Steps:**
+    Based on the test results after the edit, determine if additional changes are needed.
+    """)
+    
+    COVERAGE_PROMPT = textwrap.dedent("""
+    # 📊 Test Coverage Analysis Expert
+    
+    You are analyzing test coverage to understand what code is being tested.
+    
+    **Coverage Analysis:**
+    - Identify which functions and classes are tested
+    - Understand test coverage gaps
+    - Analyze test quality and effectiveness
+    - Identify untested edge cases
+    
+    **Coverage Assessment:**
+    1. Determine if the failing code is covered by tests
+    2. Identify areas that need additional testing
+    3. Understand the relationship between tests and code
+    4. Assess test quality and completeness
+    
+    **Next Steps:**
+    Based on coverage analysis, determine if additional tests are needed or if existing tests need improvement.
+    """)
+    
+    SMELLS_PROMPT = textwrap.dedent("""
+    # 👃 Code Smell Detection Expert
+    
+    You are identifying code smells and anti-patterns that might cause issues.
+    
+    **Smell Detection:**
+    - Long functions and complex methods
+    - Duplicate code and repetition
+    - Magic numbers and hardcoded values
+    - Poor naming conventions
+    - Complex conditional logic
+    
+    **Quality Assessment:**
+    1. Identify potential code quality issues
+    2. Understand how smells might relate to the current problem
+    3. Prioritize smells by their impact on the issue
+    4. Suggest improvements for code quality
+    
+    **Next Steps:**
+    Based on code smell analysis, determine if quality issues are contributing to the problem.
+    """)
+    
+    QUALITY_PROMPT = textwrap.dedent("""
+    # 📈 Code Quality Metrics Expert
+    
+    You are analyzing code quality metrics to understand code health.
+    
+    **Metrics Analysis:**
+    - Cyclomatic complexity and code complexity
+    - Maintainability index
+    - Code duplication and similarity
+    - Documentation coverage
+    - Performance characteristics
+    
+    **Quality Assessment:**
+    1. Understand the overall code quality
+    2. Identify areas that might be causing issues
+    3. Assess the maintainability of the code
+    4. Look for quality-related problems
+    
+    **Next Steps:**
+    Based on quality metrics, determine if code quality issues are affecting the current problem.
+    """)
+    
+    GIT_HISTORY_PROMPT = textwrap.dedent("""
+    # 📜 Git History Analysis Expert
+    
+    You are analyzing git history to understand recent changes and their impact.
+    
+    **History Analysis:**
+    - Recent commits and their purposes
+    - Changes that might have introduced the issue
+    - Code evolution and refactoring history
+    - Bug fixes and feature additions
+    
+    **Change Impact:**
+    1. Identify recent changes that might be related to the problem
+    2. Understand the context of recent modifications
+    3. Look for patterns in recent commits
+    4. Assess the impact of recent changes
+    
+    **Next Steps:**
+    Based on git history, determine if recent changes are related to the current issue.
+    """)
+    
+    GIT_STATUS_PROMPT = textwrap.dedent("""
+    # 📋 Git Status Analysis Expert
+    
+    You are checking the current git status to understand the repository state.
+    
+    **Status Analysis:**
+    - Current branch and working directory state
+    - Staged and unstaged changes
+    - Untracked files
+    - Repository cleanliness
+    
+    **State Assessment:**
+    1. Understand the current working state
+    2. Identify any uncommitted changes
+    3. Check if the repository is in a clean state
+    4. Assess the impact of current changes
+    
+    **Next Steps:**
+    Based on git status, determine if the current state affects the problem or solution.
+    """)
+    
+    GIT_LOG_PROMPT = textwrap.dedent("""
+    # 📝 Git Log Analysis Expert
+    
+    You are examining git commit history to understand recent changes.
+    
+    **Log Analysis:**
+    - Recent commit messages and purposes
+    - Authors and timestamps
+    - Commit patterns and frequency
+    - Related commits and changes
+    
+    **History Context:**
+    1. Understand recent development activity
+    2. Identify commits that might be relevant
+    3. Look for patterns in recent changes
+    4. Assess the development timeline
+    
+    **Next Steps:**
+    Based on git log, determine if recent commits provide context for the current problem.
+    """)
+    
+    GIT_BRANCHES_PROMPT = textwrap.dedent("""
+    # 🌿 Git Branch Analysis Expert
+    
+    You are examining git branches to understand the repository structure.
+    
+    **Branch Analysis:**
+    - Available branches and their purposes
+    - Current branch and its context
+    - Branch relationships and merges
+    - Development workflow patterns
+    
+    **Branch Context:**
+    1. Understand the branching strategy
+    2. Identify relevant branches for the problem
+    3. Assess the current branch context
+    4. Look for branch-related issues
+    
+    **Next Steps:**
+    Based on branch analysis, determine if branch context affects the current problem.
+    """)
+    
+    GIT_DIFF_PROMPT = textwrap.dedent("""
+    # 🔍 Git Diff Analysis Expert
+    
+    You are examining git differences to understand what has changed.
+    
+    **Diff Analysis:**
+    - Changes between commits or working directory
+    - Added, modified, and deleted code
+    - Change patterns and impact
+    - Potential issues introduced by changes
+    
+    **Change Assessment:**
+    1. Understand what has been modified
+    2. Identify changes that might cause issues
+    3. Assess the impact of modifications
+    4. Look for patterns in the changes
+    
+    **Next Steps:**
+    Based on diff analysis, determine if recent changes are related to the current problem.
+    """)
+    
+    FILTER_TESTS_PROMPT = textwrap.dedent("""
+    # 🎯 Test Function Filtering Expert
+    
+    You are filtering test functions to identify the most relevant ones for the problem.
+    
+    **Filtering Strategy:**
+    - Identify tests that directly relate to the problem
+    - Filter out irrelevant or unrelated tests
+    - Prioritize tests by relevance and specificity
+    - Focus on tests that validate the failing functionality
+    
+    **Relevance Assessment:**
+    1. Match test names and content to the problem
+    2. Identify tests that cover the failing code
+    3. Prioritize tests by their connection to the issue
+    4. Remove tests that are not relevant
+    
+    **Next Steps:**
+    Based on filtered test results, focus on the most relevant tests for the problem.
+    """)
+    
+    FINISH_PROMPT = textwrap.dedent("""
+    # ✅ Task Completion Expert
+    
+    You are finalizing the current task and preparing the results.
+    
+    **Completion Assessment:**
+    - Verify that the task objectives have been met
+    - Ensure all required actions have been completed
+    - Validate that the solution is correct and complete
+    - Prepare a summary of what was accomplished
+    
+    **Final Steps:**
+    1. Confirm that the problem has been resolved
+    2. Ensure all tests are passing
+    3. Validate that the solution is complete
+    4. Prepare final results and summary
+    
+    **Next Steps:**
+    Signal task completion and provide final results.
+    """)
+    
+    CHECKPOINT_PROMPT = textwrap.dedent("""
+    # 💾 Progress Checkpoint Expert
+    
+    You are saving the current progress to ensure work is not lost.
+    
+    **Checkpoint Strategy:**
+    - Save current state and progress
+    - Document what has been accomplished
+    - Preserve successful changes and fixes
+    - Create a recovery point for future reference
+    
+    **Progress Documentation:**
+    1. Record what has been completed successfully
+    2. Save the current state of the codebase
+    3. Document any fixes that have been applied
+    4. Create a reference point for continued work
+    
+    **Next Steps:**
+    Continue with the next phase of the task, knowing progress is safely saved.
+    """)
+    
+    PARALLEL_ANALYSIS_PROMPT = textwrap.dedent("""
+    # ⚡ Parallel Codebase Analysis Expert
+    
+    You are performing comprehensive analysis using parallel execution for efficiency.
+    
+    **Parallel Analysis Strategy:**
+    - Execute multiple analysis tools simultaneously
+    - Gather comprehensive information efficiently
+    - Coordinate analysis across different aspects
+    - Synthesize results from multiple sources
+    
+    **Analysis Coordination:**
+    1. Identify multiple analysis needs
+    2. Execute analyses in parallel where possible
+    3. Combine and synthesize results
+    4. Identify patterns across different analyses
+    
+    **Next Steps:**
+    Based on parallel analysis results, determine the most effective next actions.
+    """)
+    
+    PARALLEL_DISCOVERY_PROMPT = textwrap.dedent("""
+    # 🔍 Parallel Test Discovery Expert
+    
+    You are discovering test functions using parallel search strategies.
+    
+    **Discovery Strategy:**
+    - Use multiple search approaches simultaneously
+    - Explore different patterns and criteria
+    - Coordinate discovery across search methods
+    - Synthesize findings from various sources
+    
+    **Discovery Coordination:**
+    1. Identify multiple search strategies
+    2. Execute searches in parallel
+    3. Combine and deduplicate results
+    4. Prioritize findings by relevance
+    
+    **Next Steps:**
+    Based on parallel discovery results, focus on the most relevant test functions.
+    """)
+    
+    PARALLEL_OPERATIONS_PROMPT = textwrap.dedent("""
+    # ⚡ Parallel File Operations Expert
+    
+    You are performing multiple file operations simultaneously for efficiency.
+    
+    **Parallel Operations Strategy:**
+    - Execute multiple file operations concurrently
+    - Coordinate operations for maximum efficiency
+    - Handle dependencies between operations
+    - Synthesize results from multiple operations
+    
+    **Operation Coordination:**
+    1. Identify operations that can run in parallel
+    2. Execute operations simultaneously where safe
+    3. Handle sequential dependencies properly
+    4. Combine results from multiple operations
+    
+    **Next Steps:**
+    Based on parallel operation results, proceed with the next phase of the task.
+    """)
+    
+    PERFORMANCE_PROMPT = textwrap.dedent("""
+    # 📊 Performance Metrics Expert
+    
+    You are analyzing performance metrics to optimize execution efficiency.
+    
+    **Performance Analysis:**
+    - Execution time and resource usage
+    - Tool performance and efficiency
+    - Bottlenecks and optimization opportunities
+    - Performance trends and patterns
+    
+    **Optimization Assessment:**
+    1. Identify performance bottlenecks
+    2. Understand tool efficiency patterns
+    3. Look for optimization opportunities
+    4. Assess the impact of performance on task completion
+    
+    **Next Steps:**
+    Based on performance analysis, optimize the approach for better efficiency.
+    """)
+    
+    DEFAULT_PROMPT = textwrap.dedent("""
+    # 🛠️ General Tool Execution Expert
+    
+    You are executing a tool to gather information or perform an action.
+    
+    **Execution Focus:**
+    - Understand the tool's purpose and capabilities
+    - Execute the tool effectively
+    - Analyze the results appropriately
+    - Determine the next logical step
+    
+    **Analysis Approach:**
+    1. Understand what the tool is designed to do
+    2. Execute it with appropriate parameters
+    3. Analyze the results in context
+    4. Determine the most relevant next action
+    
+    **Next Steps:**
+    Based on the tool results, suggest the next most appropriate action.
+    """)
+    
+    def get_tool_prompt(self, tool_name: str) -> str:
+        """Get the specific prompt for a tool"""
+        return self.tool_prompts.get(tool_name, self.DEFAULT_PROMPT)
+    
+    def predict_next_tool(self, problem_statement: str, current_context: str, recent_tools: List[str]) -> str:
+        """Predict the most likely next tool based on context"""
+        # Simple heuristic-based prediction
+        problem_lower = problem_statement.lower()
+        context_lower = current_context.lower()
+        
+        # If we're in test discovery phase
+        if any(tool in recent_tools for tool in ["search_in_all_files_content_v2", "filter_test_func_names"]):
+            if "test" in problem_lower or "fail" in problem_lower:
+                return "analyze_test_coverage"
+            return "test_patch_find_finish"
+        
+        # If we're in code analysis phase
+        if any(tool in recent_tools for tool in ["get_file_content", "analyze_dependencies"]):
+            return "apply_code_edit"
+        
+        # If we're in code editing phase
+        if any(tool in recent_tools for tool in ["apply_code_edit", "grep_replace_once"]):
+            return "run_repo_tests"
+        
+        # If tests are failing
+        if "fail" in context_lower or "error" in context_lower:
+            return "analyze_dependencies"
+        
+        # Default based on problem type
+        if "test" in problem_lower:
+            return "search_in_all_files_content_v2"
+        else:
+            return "get_file_content"
+    
+    def enhance_system_prompt(self, base_system_prompt: str, next_tool_name: str = None, current_context: dict = None) -> str:
+        """Enhance the system prompt with tool-specific guidance"""
+        if not next_tool_name:
+            return base_system_prompt
+        
+        tool_guidance = self.get_tool_prompt(next_tool_name)
+        if not tool_guidance:
+            return base_system_prompt
+        
+        # Add tool-specific guidance before the format prompt
+        enhanced_prompt = base_system_prompt.replace(
+            "{format_prompt}",
+            f"{tool_guidance}\n\n{{format_prompt}}"
+        )
+        
+        return enhanced_prompt
+
 
 TEST_PATCH_FIND_SYSTEM_PROMPT_TEMPLATE_V0 = textwrap.dedent("""
 # 🧠 Test Function Finder
@@ -35,7 +632,6 @@ You are a code analysis expert tasked with identifying test functions that direc
 **🔍 Step-by-Step Process**
 1. **Problem Analysis** 
    - Parse the problem statement Carefully
-   - Read "Hints" carefully if it exists. It will helpful for solving problems.   
    - Identify affected functions/classes
    - Note expected input/output behaviors
 
@@ -80,7 +676,6 @@ You are a code analysis expert tasked with identifying test functions that direc
 **🔍 Step-by-Step Process**
 1. **Problem Analysis** 
    - Parse the problem statement Carefully
-   - Read "Hints" carefully if it exists. It will helpful for solving problems.   
    - Identify affected functions/classes
    - Note expected input/output behaviors
 
@@ -163,9 +758,9 @@ Your task: Fix all the failures from `run_repo_tests` test.
 3. Use `apply_code_edit_and_run_repo_tests` to fix the code and run the test immediately. You can add debug prints and run tests too. For debug prints: use `print("DEBUG: <message>")` or `print(f"DEBUG: <message> {{<variable>}}")`
 4. Use `apply_code_edit` to fix the code, but not run the test immediately.
 5. Use `run_repo_tests` to run the test again.
+6. You can print variable dumps(str(variable)) for debug purpose and see it in the result of `run_repo_tests`. You can compare the test result which will also give you an idea.
 7. Repeat the process until all the failures are fixed. You will see "Successfully ran all tests." from `run_repo_tests`.
 8. Use `pytest_fix_finish` to finish the task.
-9. For debugging purpose, you can raise an Error or Exception with messages including variable contents and rollback it.
 
 **✅ Validation** 
 - Use `run_repo_tests` to test your fixes. You must fix all the failures.
@@ -340,9 +935,6 @@ PATCH_FIND_INSTANCE_PROMPT_TEMPLATE = textwrap.dedent("""
 Problem Statement:
 {problem_statement}
 
-🔍 Strategic Hints Analysis:
-{hints}
-
 🔎 Codebase Search Results:
 {search_results}
 
@@ -371,7 +963,7 @@ Generate only SINGLE triplet of `next_thought`, `next_tool_name`, `next_tool_arg
 """)
 
 DEFAULT_PROXY_URL = os.getenv("AI_PROXY_URL", "http://sandbox_proxy")
-DEFAULT_TIMEOUT = int(os.getenv("AGENT_TIMEOUT", "1800"))
+DEFAULT_TIMEOUT = int(os.getenv("AGENT_TIMEOUT", "2200"))
 MAX_TEST_PATCH_TIMEOUT = int(os.getenv("MAX_STEPS_TEST_PATCH_FIND", "400"))
 
 GLM_MODEL_NAME = "zai-org/GLM-4.5-FP8"
@@ -379,7 +971,7 @@ KIMI_MODEL_NAME = "moonshotai/Kimi-K2-Instruct"
 DEEPSEEK_MODEL_NAME = "deepseek-ai/DeepSeek-V3-0324"
 AGENT_MODELS=[GLM_MODEL_NAME, KIMI_MODEL_NAME, DEEPSEEK_MODEL_NAME]
 
-MAX_STEPS = 400
+MAX_STEPS = 300
 MAX_STEPS_TEST_PATCH_FIND = 100
 DEBUG_MODE=True
 
@@ -893,24 +1485,11 @@ class COT:
         self.thoughts: list[COT.Action] = []
         self.latest_observations_to_keep=latest_observations_to_keep
         
-    def is_valid_tool_call(self, next_tool_name: str|list, next_tool_args: dict|list) -> bool:
-        if len(self.thoughts) == 0:
-            return True
-            
-        last_tool_name = self.thoughts[-1].next_tool_name
-        last_tool_args = self.thoughts[-1].next_tool_args
-        
-        # Exact match check - definitely reject
-        if next_tool_name == last_tool_name and next_tool_args == last_tool_args:
-            return False
-            
-        return True
-
-    def add_action(self, action:COT.Action) -> bool: # don't add if thought is repeated
-        # if not self.is_valid_tool_call(action.next_tool_name, action.next_tool_args):
-        #     return False
+    def add_action(self, action:COT.Action):
+        for thought in self.thoughts:
+            if thought.next_thought==action.next_thought and thought.next_tool_name==action.next_tool_name and thought.next_tool_args==action.next_tool_args:
+                thought.is_deleted=True
         self.thoughts.append(action)
-        return True
         
     def is_thought_repeated(self)->bool:
         # Check if the last thought is the same as the previous thought.
@@ -1105,7 +1684,6 @@ class Utils:
             except Exception as e:
                 logger.info(f"unable to fix manually, trying with llm")
                 fixed_json=Network.fix_json_string_with_llm(json_string)
-                # if fixed_json == ""
                 if fixed_json:
                     return fixed_json
                 else:
@@ -1168,12 +1746,10 @@ class Network:
             logger.error(f"Error fixing json string: {e},trying again..")
             logger.error(f"json string is :{json_string}")
             logger.error(f"LLM response is :{response}")
-            # if "API issues or malformed streaming response." in response:
-            #     return "API issues or malformed streaming response."
-            # attempt+=1
-            # if attempt>5:
-            return None
-            # return cls.fix_json_string_with_llm(json_string,attempt)
+            attempt+=1
+            if attempt>5:
+                return None
+            return cls.fix_json_string_with_llm(json_string,attempt)
             
             
     @classmethod
@@ -1226,10 +1802,8 @@ class Network:
                     logger.error("--------------------------------")
                     logger.error(f"raw_text: {raw_text}")
                     logger.error("--------------------------------")
-                    raise Exception(error_msg)     
-                
-                
-
+                    raise Exception(error_msg)
+                    
                 next_thought, next_tool_name, next_tool_args,error_msg = cls.parse_response(raw_text)
                 if error_msg:
                     raise Exception(error_msg)
@@ -1238,17 +1812,12 @@ class Network:
                 error_body = str(e)
                 logger.error(f"Error: {error_body}")
                 if attempt < max_retries:
-                    # delay = min(base_delay * (2 ** attempt),8)
-                    delay = base_delay
+                    delay = min(base_delay * (2 ** attempt),8)
                     logger.info(error_body)
                     logger.error("--------------------------------")
                     logger.error(f"response: {raw_text}")
                     logger.error("--------------------------------")
                     logger.info(f"[agent] Retrying in {delay} seconds... (attempt {attempt + 1}/{max_retries})") 
-
-                    if "This may indicate API issues or malformed streaming response." in raw_text:
-                        raise RuntimeError("API issues or malformed streaming response")
-
                     if "RATE_LIMIT_EXCEEDED" in error_body:
                         error_counter[cls.ErrorType.RATE_LIMIT_EXCEEDED.name]+=1
                     elif "RESERVED_TOKEN_PRESENT" in error_body:
@@ -1419,20 +1988,20 @@ class EnhancedNetwork(Network):
             logger.error(f"Error fixing json string: {e},trying again..")
             logger.error(f"json string is :{json_string}")
             logger.error(f"LLM response is :{response}")
-            # attempt+=1
-            # if attempt>5:
-            return None
-            # return cls.fix_json_string_with_llm(json_string,attempt)
+            attempt+=1
+            if attempt>5:
+                return None
+            return cls.fix_json_string_with_llm(json_string,attempt)
     
     @classmethod
-    def make_request(cls,messages:list,model:str,attempt:int=0, temperature:float=0.0)->str:
+    def make_request(cls,messages:list,model:str,attempt:int=0)->str:
         url = f"{DEFAULT_PROXY_URL.rstrip('/')}/agents/inference"
         
         # Cache miss - make the actual request
         request_data = {
                 "run_id": run_id if run_id else "1",
                 "messages": messages,
-                "temperature": temperature,
+                "temperature": 0.0,
             }
 
         headers = {
@@ -1440,6 +2009,7 @@ class EnhancedNetwork(Network):
         }
         # request_data['model']=AGENT_MODELS[attempt%len(AGENT_MODELS)]
         request_data['model'] = model
+        print(f"[agent] request_data: {request_data}")
         response = requests.post(url, json=request_data, timeout=120, headers=headers)
         print(f"[agent] HTTP {response.status_code} from {url} ({len(response.content)} bytes), using model: {model}")
         print(f"[agent] run_id: {run_id}, response: {response.content}")
@@ -1462,8 +2032,7 @@ class EnhancedNetwork(Network):
     def _request_next_action_with_retry(cls, messages: dict, 
                             model: str,
                             max_retries: int = 5, 
-                            base_delay: float = 1.0,
-                            temperature: float = 0.0) -> str:
+                            base_delay: float = 1.0) -> str:
         
         raw_text='not defined'
         error_counter=cls.get_error_counter()
@@ -1473,7 +2042,7 @@ class EnhancedNetwork(Network):
             try:
                 total_attempts+=1
                 index = AGENT_MODELS.index(model) if model in AGENT_MODELS else -1
-                raw_text=cls.make_request(messages,model=AGENT_MODELS[(index + attempt)%len(AGENT_MODELS)], temperature=temperature)
+                raw_text=cls.make_request(messages,model=AGENT_MODELS[(index + attempt)%len(AGENT_MODELS)])
                 is_valid,error_msg=cls.is_valid_response(raw_text)
                 if not(is_valid):
                     raise Exception(error_msg)
@@ -1486,8 +2055,7 @@ class EnhancedNetwork(Network):
                 error_body = str(e)
                 logger.error(f"Error: {error_body}")
                 if attempt < max_retries:
-                    # delay = min(base_delay * (2 ** attempt),8)
-                    delay = base_delay
+                    delay = min(base_delay * (2 ** attempt),8)
                     logger.info(error_body)
                     logger.error("--------------------------------")
                     logger.error(f"response: {raw_text}")
@@ -1520,7 +2088,7 @@ class EnhancedNetwork(Network):
         return next_thought, next_tool_name, next_tool_args,raw_text,total_attempts,error_counter,messages
     
     @classmethod
-    def inference(cls, messages: List[Dict[str, Any]], model: str, run_id: str = "1",return_json:bool=False, temperature:float=0.0) -> dict:
+    def inference(cls, messages: List[Dict[str, Any]], model: str, run_id: str = "1",return_json:bool=False) -> dict:
         """Prod inference with caching"""
         # Build request data
         cleaned_msgs: List[Dict[str, Any]] = []
@@ -1540,7 +2108,7 @@ class EnhancedNetwork(Network):
         if not cleaned_msgs:
             raise RuntimeError("No valid messages to send to proxy.")
 
-        next_thought,next_tool_name,next_tool_args,raw_text,total_attempts,error_counter,messages = cls._request_next_action_with_retry(cleaned_msgs, model=model, temperature=temperature)
+        next_thought,next_tool_name,next_tool_args,raw_text,total_attempts,error_counter,messages = cls._request_next_action_with_retry(cleaned_msgs, model=model)
         
         return next_thought,next_tool_name,next_tool_args,raw_text,total_attempts,error_counter,messages
     
@@ -2469,18 +3037,7 @@ class ToolManager:
         self.tool_invocations={
           k:0 for k in self.TOOL_LIST.keys()
         }
-    
-    def postprocess_grep_search(self, result: str, test_only: bool):
-        # split result by lines and for each line, split filename and other part. xxx:10:  yyyy
-        result = result.splitlines()
-        filtered = []
-        for line in result:
-            parts = line.split(":")
-            if not test_only or 'test' in parts[0]:
-                filtered.append(line)
-
-        return "\n".join(filtered)
-
+        
     def check_syntax_error(self,content:str,file_path:str="<unknown>")->bool:
         try:
             ast.parse(content, filename=file_path)
@@ -2608,91 +3165,6 @@ class ToolManager:
             )
 
         return tool_method
-    
-    
-    def _add_context_to_similar_match(self, original_content: str, formatted_match: str, context_lines: int = 2) -> str:
-        """Add context lines around a similar match for better understanding."""
-        lines = original_content.split('\n')
-        
-        # Extract the actual content from the formatted match (remove the description part)
-        match_lines = formatted_match.split('\n')
-        if len(match_lines) < 2:
-            return formatted_match
-            
-        # Skip the description line (e.g., "Lines 45-47: ..." or "Line 23: ...")
-        actual_content_lines = match_lines[1:]
-        actual_content = '\n'.join(actual_content_lines)
-        
-        # Find where this content appears in the original file
-        best_match_start = -1
-        best_similarity = 0
-        
-        # Search for the best matching position in the original content
-        for i in range(len(lines) - len(actual_content_lines) + 1):
-            candidate_lines = lines[i:i + len(actual_content_lines)]
-            candidate_content = '\n'.join(candidate_lines)
-            
-            import difflib
-            similarity = difflib.SequenceMatcher(None, actual_content.strip(), candidate_content.strip()).ratio()
-            if similarity > best_similarity:
-                best_similarity = similarity
-                best_match_start = i
-        
-        if best_match_start == -1:
-            return formatted_match  # Fallback to original if can't find position
-        
-        # Calculate context boundaries
-        start_line = max(0, best_match_start - context_lines)
-        end_line = min(len(lines), best_match_start + len(actual_content_lines) + context_lines)
-        
-        # Build the context with line numbers
-        context_lines_list = []
-        for i in range(start_line, end_line):
-            line_num = i + 1
-            prefix = ">>> " if best_match_start <= i < best_match_start + len(actual_content_lines) else "    "
-            context_lines_list.append(f"{prefix}{line_num:4}| {lines[i]}")
-        
-        # Extract original description
-        description = match_lines[0] if match_lines else f"Match found at lines {best_match_start+1}-{best_match_start+len(actual_content_lines)}"
-        
-        return f"{description}\n" + "\n".join(context_lines_list)
-
-
-    def _find_most_similar_content(self, original_content: str, search_string: str, max_results: int = 3) -> list[tuple[float, str]]:
-        """Find the most similar content chunks to the search string."""
-        import difflib
-        
-        # Split content into meaningful chunks
-        lines = original_content.split('\n')
-        
-        # Try different chunk sizes to find the best match
-        chunks = []
-        
-        # Individual lines
-        for i, line in enumerate(lines):
-            if line.strip():  # Skip empty lines
-                chunks.append((f"Line {i+1}: {line.strip()}", line.strip()))
-        
-        # Multi-line chunks (3-5 lines) for better context
-        search_lines = search_string.split('\n')
-        target_chunk_size = max(3, len(search_lines))
-        
-        for i in range(len(lines) - target_chunk_size + 1):
-            chunk_lines = lines[i:i + target_chunk_size]
-            chunk_content = '\n'.join(chunk_lines).strip()
-            if chunk_content:
-                chunks.append((f"Lines {i+1}-{i+target_chunk_size}: ...", chunk_content))
-        
-        # Calculate similarity scores
-        similarities = []
-        for chunk_desc, chunk_content in chunks:
-            ratio = difflib.SequenceMatcher(None, search_string.strip(), chunk_content).ratio()
-            if ratio > 0.3:  # Only include reasonably similar content
-                similarities.append((ratio, chunk_desc, chunk_content))
-        
-        # Sort by similarity and return top results
-        similarities.sort(key=lambda x: x[0], reverse=True)
-        return [(ratio, f"{desc}\n{content}") for ratio, desc, content in similarities[:max_results]]
 
     def _get_file_content(
         self,
@@ -2709,7 +3181,6 @@ class ToolManager:
         - If line range is provided, adjusts to function boundaries.
         - If limit != -1, trims output to n characters.
         """
-
         # If search term is provided, use specialized search
         if search_term:
             logger.debug(f"search_term specified: {search_term}, searching in v2")
@@ -3282,24 +3753,20 @@ class ToolManager:
         Output:
             locations where pattern was found with file paths and line numbers
         '''
-        # if test_files_only:
-        # # Add test file includes
-        #     if "--include='test_*.py'" not in grep_search_command:
-        #         grep_search_command += " --include='test_*.py'"
-        #     if "--include='*_test.py'" not in grep_search_command:
-        #         grep_search_command += " --include='*_test.py'"
-        #     if "--include='*test*.py'" not in grep_search_command:
-        #         grep_search_command += " --include='*test*.py'"
-        #     # Remove general *.py include if present
-        #     grep_search_command = grep_search_command.replace("--include='*.py'", "")
-
-
+        if test_files_only:
+        # Add test file includes
+            if "--include='test_*.py'" not in grep_search_command:
+                grep_search_command += " --include='test_*.py'"
+            if "--include='*_test.py'" not in grep_search_command:
+                grep_search_command += " --include='*_test.py'"
+            if "--include='*test*.py'" not in grep_search_command:
+                grep_search_command += " --include='*test*.py'"
+            # Remove general *.py include if present
+            grep_search_command = grep_search_command.replace("--include='*.py'", "")
 
         # Remove output truncation
         output = subprocess.run(["bash", "-c", grep_search_command], capture_output=True, text=True)
         output = output.stdout  # Return full output without truncation
-
-        output = self.postprocess_grep_search(output, test_files_only)
 
         if not output:
             file_type = "test files" if test_files_only else "the codebase"
@@ -3883,8 +4350,6 @@ class ToolManager:
         Output:
             operation status - success confirmation or detailed error with guidance
         '''
-        if search == replace:
-            return "ERROR: search and replace are the same. Please provide a different search and replace."
         if not self.is_solution_approved:
             raise ToolManager.Error(ToolManager.Error.ErrorType.INVALID_TOOL_CALL.name,f"Error: You cannot use this tool before you have approval from user on your proposed solution. Please call get_approval_for_solution tool first with list of proposed solutions.")
         if not os.path.exists(file_path):
@@ -3895,22 +4360,8 @@ class ToolManager:
 
         match original.count(search):
             case 0:
-                # Find most similar content to help LLM correct the search string
-                similar_matches = self._find_most_similar_content(original, search, 1)
-                
-                error_msg = f"Error: search string not found in file {file_path}."
-                
-                if similar_matches:
-                    error_msg += f"\n\nMost similar snippet found (you may need to adjust your search string):"
-                    for i, (ratio, content) in enumerate(similar_matches, 1):
-                        similarity_pct = int(ratio * 100)
-                        # Add context lines around the match for better understanding
-                        content_with_context = self._add_context_to_similar_match(original, content, context_lines=2)
-                        error_msg += f"\n\n{i}. Similarity: {similarity_pct}%\n{content_with_context}"
-                else:
-                    error_msg += " No similar content found. Please check the file content and provide the exact code you want to replace."
-                
-                return error_msg
+                logger.error(f"search string not found in file {file_path}. You need to share the exact code you want to replace.")
+                raise ToolManager.Error(ToolManager.Error.ErrorType.SEARCH_TERM_NOT_FOUND.name,f"Error: search string not found in file {file_path}. You need to share the exact code you want to replace.")
             case 1:
                 
                 new_content = original.replace(search, replace)
@@ -4827,7 +5278,6 @@ class EnhancedToolManager(ToolManager):
         self.previous_failed_tests = []
         self.first_run_repo_tests_call = True
         self.can_finish = False
-        self.pytest_timeout_secs = 60
         self.last_run_repo_tests_failure_output = ""
         self.performance_monitor = PerformanceMonitor()
         self.parallel_executor = ParallelToolExecutor(self)
@@ -5541,8 +5991,6 @@ class EnhancedToolManager(ToolManager):
             command = PYTEST_COMMAND_TEMPLATE.format(file_paths=file_paths_str)
             result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=60)
             out = (result.stdout or "") + (result.stderr or "")
-            self.logs.append("`run_repo_tests` output: \n" + out)
-
             output, success, failed_count = self.analyze_pytest_output(out)
             if test_runner != 'pytest' and self._check_dependency_errors(output):
                 last_test_runner = test_runner
@@ -5578,9 +6026,6 @@ class EnhancedToolManager(ToolManager):
                         output = out
                     return out, success
 
-            # self.logs.append("`run_repo_tests` output: \n" + out)
-            # output, success, failed_count = self.analyze_pytest_output(out)
-
             if not success:
                 if len(out) > 20000:
                     lines = out.splitlines()
@@ -5597,22 +6042,15 @@ class EnhancedToolManager(ToolManager):
                 if failed_count > 0:
                     debug_prints = self._extract_debug_prints_from_pytest(out)
                     failed_test_names = self._extract_failed_test_names(output)
-                    debug_outputs = "" 
                     if debug_prints and failed_test_names:
-                        debug_outputs += "\n\n=================================== Debug Prints ===================================\n\n"
+                        output += "\n\n=================================== Debug Prints ===================================\n\n"
                         for test_name, prints in debug_prints.items():
                             if test_name in failed_test_names:
                                 if len(prints) > 0:
                                     output += f"\n---------------------------------- Debug prints for {test_name} ----------------------------------\n"
                                     for print in prints:
                                         output += f"\n{print}"
-                        debug_outputs += "\n\n=================================== End of Debug Prints ===================================\n\n"
-                    
-                    # Only add debug_outputs if it has less than 500 lines
-                    if debug_outputs:
-                        debug_outputs_lines = debug_outputs.splitlines()
-                        if len(debug_outputs_lines) < 500:
-                            output += debug_outputs
+                        output += "\n\n=================================== End of Debug Prints ===================================\n\n"
 
                 if self.failed_count > failed_count: # if you've made progress, checkpoint your progress
                     if failed_count > 0:
@@ -5645,16 +6083,16 @@ class EnhancedToolManager(ToolManager):
         if not grep_search_command.startswith("grep"):
             return "Invalid grep_search_command. grep_search_command should start from `grep`"
 
-        # if test_files_only:
-        #     # Add each --include pattern only if not already present in the command
-        #     if "--include='test_*.py'" not in grep_search_command:
-        #         grep_search_command += " --include='test_*.py'"
-        #     if "--include='*_test.py'" not in grep_search_command:
-        #         grep_search_command += " --include='*_test.py'"
-        #     if "--include='*test*.py'" not in grep_search_command:
-        #         grep_search_command += " --include='*test*.py'"
-        #     # Remove --include='*.py' if present in the command
-        #     grep_search_command = grep_search_command.replace("--include='*.py'", "")
+        if test_files_only:
+            # Add each --include pattern only if not already present in the command
+            if "--include='test_*.py'" not in grep_search_command:
+                grep_search_command += " --include='test_*.py'"
+            if "--include='*_test.py'" not in grep_search_command:
+                grep_search_command += " --include='*_test.py'"
+            if "--include='*test*.py'" not in grep_search_command:
+                grep_search_command += " --include='*test*.py'"
+            # Remove --include='*.py' if present in the command
+            grep_search_command = grep_search_command.replace("--include='*.py'", "")
 
         if self.blacklisted_test_files:
             for file in self.blacklisted_test_files:
@@ -5665,10 +6103,7 @@ class EnhancedToolManager(ToolManager):
         output = subprocess.run(["bash", "-c", grep_search_command], capture_output=True)
 
         output = output.stdout.decode("utf-8")
-        output = self.postprocess_grep_search(output, test_files_only)
-        
         output = Utils.limit_strings(output, n=100)
-        
         if not output:
             file_type = "test files" if test_files_only else "the codebase"
             raise ToolManager.Error(ToolManager.Error.ErrorType.SEARCH_TERM_NOT_FOUND.name, f"'{grep_search_command}' not found in {file_type}.")
@@ -5837,56 +6272,40 @@ class EnhancedToolManager(ToolManager):
         Output:
             operation status - success confirmation or detailed error with guidance
         '''
-        if search == replace:
-            return "ERROR: search and replace are the same. Please provide a different search and replace."
         if self.should_checkpoint:
             return "You must checkpoint your progress using `checkpoint_progress` tool before you can apply any code edits."
         if not self.is_solution_approved:
-            return f"Error: You cannot use this tool before you have approval from user on your proposed solution. Please call get_approval_for_solution tool first with list of proposed solutions."
+            raise ToolManager.Error(ToolManager.Error.ErrorType.INVALID_TOOL_CALL.name,f"Error: You cannot use this tool before you have approval from user on your proposed solution. Please call get_approval_for_solution tool first with list of proposed solutions.")
         if not os.path.exists(file_path):
-            return f"Error: file '{file_path}' does not exist."
+            logger.error(f"file '{file_path}' does not exist.")
+            raise ToolManager.Error(ToolManager.Error.ErrorType.FILE_NOT_FOUND.name,f"Error: file '{file_path}' does not exist.")
         
         if "test" in file_path.lower() and "pytest" not in file_path.lower():
-            return f"Error: You cannot change test files. Try another way."
+            raise ToolManager.Error(ToolManager.Error.ErrorType.INVALID_TOOL_CALL.name,f"Error: You cannot change test files. Try another way.")
         
         original=self._get_file_content(file_path,limit=-1)
 
         match original.count(search):
             case 0:
-                # Find most similar content to help LLM correct the search string
-                similar_matches = self._find_most_similar_content(original, search, 1)
-                
-                error_msg = f"Error: search string not found in file {file_path}."
-                
-                if similar_matches:
-                    error_msg += f"\n\nMost similar snippet found (you may need to adjust your search string):"
-                    for i, (ratio, content) in enumerate(similar_matches, 1):
-                        similarity_pct = int(ratio * 100)
-                        # Add context lines around the match for better understanding
-                        content_with_context = self._add_context_to_similar_match(original, content, context_lines=2)
-                        error_msg += f"\n\n{i}. Similarity: {similarity_pct}%\n{content_with_context}"
-                else:
-                    error_msg += " No similar content found. Please check the file content and provide the exact code you want to replace."
-                
-                return error_msg
+                logger.error(f"search string not found in file {file_path}. You need to share the exact code you want to replace.")
+                raise ToolManager.Error(ToolManager.Error.ErrorType.SEARCH_TERM_NOT_FOUND.name,f"Error: search string not found in file {file_path}. You need to share the exact code you want to replace.")
             case 1:
                 
                 new_content = original.replace(search, replace)
                 try:
-                    if file_path.endswith(".py"):
                         is_error,error=self.check_syntax_error(new_content)
-                    else:
-                        is_error = False
-                        error = None
-                    if not is_error:
-                        self.save_file(file_path, new_content)
-                        return "ok, code edit applied successfully"
-                    else:
-                        return f"Error: code edit failed. {error.message}"
-                except Exception as e:
-                    return f"Error: syntax error in file {file_path}. {e.message}"
-            case num_hits:  
-                return f"Error: search string found {num_hits} times in file '{file_path}'.\nPlease reformulate your search and replace to apply only one change."
+                        if not is_error:
+                            self.save_file(file_path, new_content)
+                                
+                            return "ok, code edit applied successfully"
+                        else:
+                            error.message="code edit failed. "+error.message
+                            raise error
+                except ToolManager.Error as e:
+                    raise ToolManager.Error(ToolManager.Error.ErrorType.SYNTAX_ERROR.name,f"Error: syntax error in file {file_path}. {e.message}")
+            case num_hits:
+                logger.error(f"search string found {num_hits} times in file '{file_path}'.\nPlease reformulate your search and replace to apply only one change.")
+                raise ToolManager.Error(ToolManager.Error.ErrorType.MULTIPLE_SEARCH_RESULTS_FOUND.name,f"Error: search string found {num_hits} times in file '{file_path}'.\nPlease reformulate your search and replace to apply only one change.")
 
     @ToolManager.tool
     def filter_test_func_names(self, test_func_names: List[str]):
@@ -5954,12 +6373,11 @@ class EnhancedToolManager(ToolManager):
         Output:
             Combined stdout/stderr (last 200 lines if long).
         '''
-        timeout_secs = self.pytest_timeout_secs
+        timeout_secs = 60
 
         if not self.test_files:
             return "ERROR: No test files found to run."
         if self.failed_test_names is None:
-            is_directory = True
             if self.first_run_repo_tests_call: # try to run tests on directories first
                 self.first_run_repo_tests_call = False
                 test_directories = set()
@@ -5974,13 +6392,10 @@ class EnhancedToolManager(ToolManager):
                         test_directories.add(test_dir)
                 if len(test_directories) > 0:
                     files_to_test = list(test_directories)
-                    is_directory = True
                 else:
                     files_to_test = self.test_files
-                    is_directory = False
             else:
                 files_to_test = self.test_files
-                is_directory = False
 
             print(f"Running tests on {files_to_test}")
             self.logs.append(f"Running tests on {files_to_test}")
@@ -5994,8 +6409,8 @@ class EnhancedToolManager(ToolManager):
             failed_test_names = self._extract_failed_test_names(output, files_to_test)
 
             if len(failed_test_names) > 10: # if there are too many failures in that directory, just try to run the file because there is time limit.
-                print(f"There are too many failures in that {'' if is_directory else 'file'}, running tests on the specified files only.")
-                self.logs.append(f"There are too many failures in that {'' if is_directory else 'file'}, running tests on the specified files only.")
+                print(f"There are too many failures in that directory, running tests on the specified files only.")
+                self.logs.append(f"There are too many failures in that directory, running tests on the specified files only.")
                 output, result = self._run_repo_tests_with_timeout(list(self.test_files), timeout_secs=timeout_secs)
                 if result:
                     self.can_finish = True
@@ -6004,16 +6419,13 @@ class EnhancedToolManager(ToolManager):
                 failed_test_names = self._extract_failed_test_names(output, files_to_test)
 
             if "ERROR: tests timed out." in output:
-                if is_directory == False:
-                    self.pytest_timeout_secs += 30
-                    
-                print(f"Running tests on the full {'' if is_directory else 'file'} timedout, running test on the specified files only.")
-                self.logs.append(f"Running tests on the full {'' if is_directory else 'file'} timedout, running test on the specified files only.")                
+                print(f"Running tests on the full directory timedout, running test on the specified files only.")
+                self.logs.append(f"Running tests on the full directory timedout, running test on the specified files only.")                
                 output, result = self._run_repo_tests_with_timeout(list(self.test_files), timeout_secs=timeout_secs)
                 if result:
                     self.can_finish = True
                     return output
-                    
+
                 failed_test_names = self._extract_failed_test_names(output, files_to_test)
 
             self.failed_test_names = self.previous_failed_tests + failed_test_names
@@ -6302,29 +6714,25 @@ def process_task(input_dict: Dict[str, Any], repod_dir: str = 'repo'):
     if task_type == "pytest_not_available":
         return has_dependency_error_task_process(input_dict, repod_dir)
     
-    result = multi_task_process(input_dict, repod_dir)
-    # Check if the result is successful
-    if result['patch'] and len(result['patch']) > 0 and "Error" not in result['logs']:
-        return result
-    # # If we reach here, task_type is "pytest_available"
-    # max_retries = 2
-    # for attempt in range(max_retries):
-    #     try:
-    #         result = multi_task_process(input_dict, repod_dir)
-    #         # Check if the result is successful
-    #         if result['patch'] and len(result['patch']) > 0 and "Error" not in result['logs']:
-    #             return result
-    #     except Exception as e:
-    #         # Log the error and retry
-    #         logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-    #         if attempt == max_retries - 1:
-    #             # Last attempt, don't retry
-    #             break
-    #         continue
+    # If we reach here, task_type is "pytest_available"
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            result = multi_task_process(input_dict, repod_dir)
+            # Check if the result is successful
+            if result['patch'] and len(result['patch']) > 0 and "Error" not in result['logs']:
+                return result
+        except Exception as e:
+            # Log the error and retry
+            logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+            if attempt == max_retries - 1:
+                # Last attempt, don't retry
+                break
+            continue
     
-    # # If all retries failed, proceed with unittest
-    # logger.info("All pytest attempts failed. Falling back to unittest approach.")
-    # return has_dependency_error_task_process(input_dict, repod_dir)
+    # If all retries failed, proceed with unittest
+    logger.info("All pytest attempts failed. Falling back to unittest approach.")
+    return has_dependency_error_task_process(input_dict, repod_dir)
 
 def has_dependency_error_task_process(input_dict: Dict[str, Any], repod_dir: str = 'repo'):
     """Main entry point for task processing and code modification.
@@ -6340,13 +6748,9 @@ def has_dependency_error_task_process(input_dict: Dict[str, Any], repod_dir: str
     
     workflow_start_time = time.time()
     problem_text = input_dict.get("problem_statement")
-    hints = input_dict.get("Hints")
     if not problem_text:
         raise ValueError("input_dict must contain 'problem_statement'.")
     
-    if hints:
-        logger.info(f"Found hints in problem statement: {hints}")
-        
     timeout = int(os.getenv("AGENT_TIMEOUT", str(DEFAULT_TIMEOUT)))
     
     logs = []
@@ -6355,9 +6759,6 @@ def has_dependency_error_task_process(input_dict: Dict[str, Any], repod_dir: str
     patch_text = ""  # Initialize to avoid UnboundLocalError
     test_func_names = []
     
-    
-    test_patch_find_elapsed_time = 0
-
     # Preprocessing step: search in all files
     tool_manager = EnhancedToolManager()
     search_command = f"grep -rn --include='*.py' . -e '{extract_keywords(problem_text)}'"
@@ -6381,6 +6782,7 @@ def has_dependency_error_task_process(input_dict: Dict[str, Any], repod_dir: str
         logger.info(f"current files:{os.listdir()}")
         logger.info(f"About to execute workflow...")
 
+        test_patch_find_elapsed_time = 0
         
         try:
             test_func_names, _logs_patch_find_workflow = execute_test_patch_find_workflow_v0(
@@ -6388,8 +6790,7 @@ def has_dependency_error_task_process(input_dict: Dict[str, Any], repod_dir: str
                 timeout=timeout, 
                 run_id_1=input_dict.get("run_id", ""), 
                 instance_id=input_dict.get("instance_id", ""),
-                search_results=search_results,
-                hints=hints  # Pass hints to workflow
+                search_results=search_results
             )
             test_patch_find_elapsed_time = time.time() - workflow_start_time 
             
@@ -6416,7 +6817,7 @@ def has_dependency_error_task_process(input_dict: Dict[str, Any], repod_dir: str
 
         patch_text, _logs_patch_workflow = execute_fix_workflow_v0(
                 problem_text,
-                timeout=timeout - test_patch_find_elapsed_time,
+                timeout=timeout,
                 run_id_1=input_dict.get("run_id", ""),
                 instance_id=input_dict.get("instance_id", ""),
                 test_func_codes=test_func_codes,
@@ -6444,8 +6845,8 @@ def agent_main(input_dict: Dict[str, Any], repo_dir: str = "repo", test_mode: bo
     global DEFAULT_PROXY_URL, REPO_DIR
     repo_dir = os.path.abspath(repo_dir)
     REPO_DIR = repo_dir
-    # if test_mode:
-    #     DEFAULT_PROXY_URL = "http://localhost:8001"
+    if test_mode:
+        DEFAULT_PROXY_URL = "http://localhost:8001"
 
     cwd = os.getcwd()
     if os.path.exists(repo_dir):
@@ -6466,7 +6867,7 @@ def set_env_for_agent():
     if Path(os.getcwd()+"/lib").exists() and os.getcwd()+"/lib" not in os.environ.get("PYTHONPATH",""):
         os.environ["PYTHONPATH"]=os.environ["PYTHONPATH"]+":"+os.getcwd()+"/lib"
 
-def execute_test_patch_find_workflow_v0(problem_statement: str, *, timeout: int, run_id_1: str, instance_id: str = "", search_results: str = "", hints: str = "") -> tuple[List[str], List[str]]:
+def execute_test_patch_find_workflow_v0(problem_statement: str, *, timeout: int, run_id_1: str, instance_id: str = "", search_results: str = "") -> tuple[List[str], List[str]]:
     global run_id
     run_id=run_id_1
     cot=COT(latest_observations_to_keep=500)
@@ -6497,8 +6898,7 @@ def execute_test_patch_find_workflow_v0(problem_statement: str, *, timeout: int,
     logger.info(f"[TEST_PATCH_FIND] Starting test patch find agent execution...")
     system_prompt = TEST_PATCH_FIND_SYSTEM_PROMPT_TEMPLATE_V0.format(tools_docs=ToolManager.get_tool_docs(),format_prompt=FORMAT_PROMPT_V0)
     instance_prompt = PATCH_FIND_INSTANCE_PROMPT_TEMPLATE.format(problem_statement=problem_statement,
-        search_results=search_results,
-        hints=hints if hints else "")
+        search_results=search_results)
 
     #QA.SYSTEM_PROMPT=QA.SYSTEM_PROMPT.format(problem_statement=problem_statement)
     
@@ -6767,19 +7167,13 @@ def execute_agent_workflow(
     last_start_over_time = time.time()
     start_over = False
     last_try_summarization = None
-    consecutive_rejections = 0  # Track consecutive tool call rejections
-    temperature = 0.0
+    tool_manager.is_repeating = 0
 
     for step in range(max_steps):
         logger.info(f"[{log_prefix}] Execution step {step + 1}/{max_steps}, Elapsed time: {time.time() - start_time} seconds, timeout: {timeout} seconds")
         logs.append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [{log_prefix}] Execution step {step + 1}/{max_steps}, Elapsed time: {time.time() - start_time} seconds, timeout: {timeout} seconds\n\n")
         model_upgrade = False
         start_over = False
-
-        if time.time() - start_time > timeout:
-            tool_manager.checkpoint = tool_manager.get_final_git_patch()
-            break
-
         if time.time() - last_model_upgrade_time > upgrade_model_time: # upgrade the model after this time
             if model_level < len(models) - 1:
                 model_level = model_level + 1
@@ -6791,6 +7185,20 @@ def execute_agent_workflow(
                 model_upgrade = True
             else:
                 logger.info(f"[{log_prefix}] No more models to upgrade")
+
+        if time.time() - last_model_upgrade_time > timeout:
+            logger.info(f"[{log_prefix}] Global timeout reached")
+            logs.append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] [{log_prefix}] Global timeout reached\n\n")
+            cot.add_action(COT.Action(
+                next_thought="global timeout reached",
+                next_tool_name="",
+                next_tool_args={},
+                observation="",
+                is_error=True,
+                inference_error_counter={},
+                request_data=[]
+            ))
+            break
         
         if time.time() - last_start_over_time > start_over_time:
             last_start_over_time = time.time()
@@ -6825,17 +7233,27 @@ def execute_agent_workflow(
                 messages[-1] = {"role": "user", "content": "Please start over the process again using `start_over` tool since you're stuck."}
 
 
+        # Initialize ToolPromptManager for enhanced prompts
+        prompt_manager = ToolPromptManager()
+        
+        # Predict next tool based on context for prompt enhancement
+        recent_tools = [action.next_tool_name for action in cot.thoughts[-5:] if action.next_tool_name]
+        predicted_next_tool = prompt_manager.predict_next_tool(problem_statement, str(cot.thoughts[-1].observation if cot.thoughts else ""), recent_tools)
+        
+        # Enhance system prompt with tool-specific guidance
+        enhanced_system_prompt = prompt_manager.enhance_system_prompt(system_prompt, predicted_next_tool)
+        
         messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": enhanced_system_prompt},
             {"role": "user", "content": instance_prompt},
         ]
         
-        # if cot.is_thought_repeated():
-        #     logger.info(f"[MAIN] Thought repeated, adding DO NOT REPEAT TOOL CALLS instruction")
-        #     logs.append(f"[{log_prefix}] Thought repeated, adding DO NOT REPEAT TOOL CALLS instruction\n\n")
-        #     last_thought = cot.thoughts[-1]
-        #     messages.append({"role": "user", "content": DO_NOT_REPEAT_TOOL_CALLS.format(previous_response=f"next_tool_name:{last_thought.next_tool_name}\n next_tool_args:{last_thought.next_tool_args}")})
-
+        if cot.is_thought_repeated():
+            tool_manager.is_repeating += 1
+            logger.info(f"[{log_prefix}] Thought repeated, adding DO NOT REPEAT TOOL CALLS instruction")
+            last_thought = cot.thoughts[-1]
+            messages.append({"role": "user", "content": DO_NOT_REPEAT_TOOL_CALLS.format(previous_response=f"next_tool_name:{last_thought.next_tool_name}\n next_tool_args:{last_thought.next_tool_args}")})
+        
         messages.extend(cot.to_str())            
         messages.append({"role": "system", "content": STOP_INSTRUCTION})
 
@@ -6847,44 +7265,14 @@ def execute_agent_workflow(
 
         try:
             inference_start_time = time.time()
-            next_thought, next_tool_name, next_tool_args, raw_text, total_attempts, error_counter, messages = EnhancedNetwork.inference(messages, model=current_model, run_id=run_id, temperature=temperature)
-            if temperature > 0.0:
-                temperature = 0.0
+            logger.info(f"[{log_prefix}] Using enhanced system prompt with tool-specific guidance for predicted tool: {predicted_next_tool}")
+            next_thought, next_tool_name, next_tool_args, raw_text, total_attempts, error_counter, messages = EnhancedNetwork.inference(messages, model=current_model, run_id=run_id)
             
             logger.info(f"[{log_prefix}] next_thought: {next_thought}\nnext_tool_name: {next_tool_name}\nnext_tool_args: {next_tool_args}\nmodel: {current_model}\nmodel inference time: {time.time() - inference_start_time} seconds")
             logs.append(f"[{log_prefix}] next_thought: {next_thought}\n\nnext_tool_name: {next_tool_name}\n\nnext_tool_args: {next_tool_args}\n\nmodel: {current_model}\n\nmodel inference time: {time.time() - inference_start_time} seconds\n\n")
 
             if next_thought == None or next_tool_name == None or next_tool_args == None:
-                cot.thoughts = cot.thoughts[:-1] # remove last thought
-                continue
-                # raise Exception("next_thought is None or next_tool_name is None or next_tool_args is None")
-                
-            if not cot.is_valid_tool_call(next_tool_name, next_tool_args):
-                consecutive_rejections += 1
-
-                logger.error(f"[{log_prefix}] Thought repeated. Skipping tool call. {consecutive_rejections}\n\n")
-                logs.append(f"[{log_prefix}] Thought repeated. Skipping tool call. {consecutive_rejections}\n\n")
-                
-                # Add feedback to the LLM about the rejected tool call
-                rejection_feedback = REJECTION_FEEDBACK_PROMPT.format(next_tool_name=next_tool_name, next_tool_args=next_tool_args, consecutive_rejections=consecutive_rejections)
-                
-                cot.add_action(COT.Action(
-                    next_thought=next_thought,
-                    next_tool_name=next_tool_name,
-                    next_tool_args=next_tool_args,
-                    observation=rejection_feedback,
-                    is_error=False,
-                    raw_response=raw_text,
-                    total_attempts=total_attempts,
-                    inference_error_counter=error_counter,
-                    request_data=messages
-                ))
-                temperature = 0.7
-                continue
-            else:
-                # Reset consecutive rejections counter on successful tool call
-                consecutive_rejections = 0
-            
+                raise Exception("next_thought is None or next_tool_name is None or next_tool_args is None")
         except Exception as e:
             import traceback
             error_msg = f"\n\nERROR: {repr(e)} {traceback.format_exc()}"
@@ -6901,9 +7289,10 @@ def execute_agent_workflow(
                 inference_error_counter=error_counter,
                 request_data=messages
             ))
-            temperature = 0.7
             continue
-
+        
+        logger.info(f"[{log_prefix}] About to execute operation: {next_tool_name}")
+       
         try:
             # Support multiple tools per step
             tool_execution_start_time = time.time()
@@ -6969,7 +7358,6 @@ def execute_agent_workflow(
                 inference_error_counter=error_counter,
                 request_data=messages
             ))
-            temperature = 0.7
             continue
         except Exception as e:
             import traceback
@@ -6991,7 +7379,6 @@ def execute_agent_workflow(
                 inference_error_counter=error_counter,
                 request_data=messages
             ))
-            temperature = 0.7
             continue
         
         # Check for finish condition
@@ -7014,14 +7401,13 @@ def execute_agent_workflow(
         logs.append(f"[{log_prefix}] Completed step {step + 1}, continuing to next step\n\n")
         logger.info(f"[{log_prefix}] [CRITICAL] Completed step {step + 1}, continuing to next step")
     logger.info(f"[{log_prefix}] [CRITICAL] Workflow completed after reaching MAX_STEPS ({max_steps})")
-    logs.append(f"[{log_prefix}] Workflow completed after reaching MAX_STEPS ({max_steps})\n\n")
     
     return tool_manager.checkpoint, logs, cot.to_str()
 
-def execute_test_patch_find_workflow_v1(problem_statement: str, *, timeout: int, run_id_1: str, instance_id: str = "", search_results: str = "", hints: str = "") -> tuple[List[str], List[str]]:
+def execute_test_patch_find_workflow_v1(problem_statement: str, *, timeout: int, run_id_1: str, instance_id: str = "", search_results: str = "") -> tuple[List[str], List[str]]:
     """Execute the test patch finding workflow."""
     print("WORKFLOW_V1")
-    max_retries = 3
+    max_retries = 5
     current_retries = 0
     while current_retries < max_retries:
         current_retries += 1
@@ -7048,8 +7434,7 @@ def execute_test_patch_find_workflow_v1(problem_statement: str, *, timeout: int,
         # Build instance prompt
         instance_prompt = PATCH_FIND_INSTANCE_PROMPT_TEMPLATE.format(
             problem_statement=problem_statement,
-            search_results=search_results,
-            hints=hints if hints else ""
+            search_results=search_results
         )
         
         test_func_names, logs, messages = execute_agent_workflow(
@@ -7128,7 +7513,6 @@ def execute_fix_workflow_v1(problem_statement: str, *, timeout: int, run_id_1: s
         instance_id=instance_id,
         models=[GLM_MODEL_NAME],
         start_over_time=timeout,
-        upgrade_model_time=timeout,
         # upgrade_model_time=700,
         tool_manager=tool_manager,
         system_prompt=system_prompt,
@@ -7147,11 +7531,10 @@ def execute_fix_workflow_v1(problem_statement: str, *, timeout: int, run_id_1: s
 
 def extract_keywords(problem_text: str) -> str:
     """Extract technical terms, exact patterns, and module paths from problem statement"""
-    
+    # Extract quoted strings (e.g., ".----", "----")
     quoted_patterns = re.findall(r'".*?"|\'.*?\'', problem_text)
-    
     module_paths = re.findall(r'\b\w+\.\w+\.\w+\b', problem_text)
-    
+    # Extract technical terms and digits
     technical_terms = [word for word in problem_text.lower().split() 
                        if word.isalnum() and len(word) > 2]
     
@@ -7160,20 +7543,10 @@ def extract_keywords(problem_text: str) -> str:
     return '|'.join(all_keywords[:10])  # Use up to 10 most relevant keywords
 
 def multi_task_process(input_dict: Dict[str, Any], repod_dir: str = 'repo'):
-    
-    test_patch_find_elapsed_time = 0
-    workflow_start_time = time.time()
-
     problem_text = input_dict.get("problem_statement")
-    hints = input_dict.get("Hints")
-    instance_id = input_dict.get("instance_id")
     if not problem_text:
         raise ValueError("input_dict must contain 'problem_statement'.")
     
-    # Extract hints from problem statement
-    if hints:
-        logger.info(f"Found hints in problem statement: {hints}")
-        
     timeout = int(os.getenv("AGENT_TIMEOUT", str(DEFAULT_TIMEOUT)))
     
     logs = []
@@ -7196,6 +7569,7 @@ def multi_task_process(input_dict: Dict[str, Any], repod_dir: str = 'repo'):
         logger.error(f"Preprocessing search failed: {str(e)}")
         search_results = "No relevant search results found"
         
+    workflow_start_time = time.time()
     set_env_for_agent()
     logger.info(f"Current working directory: {os.getcwd()} and environ:{os.environ}")
     try:
@@ -7206,6 +7580,8 @@ def multi_task_process(input_dict: Dict[str, Any], repod_dir: str = 'repo'):
         logger.info(f"current files:{os.listdir()}")
         logger.info(f"About to execute workflow...")
 
+        test_patch_find_elapsed_time = 0
+
         try:
             start_time = time.time()
             test_func_names, _logs_patch_find_workflow, test_patch_find_messages = execute_test_patch_find_workflow_v1(
@@ -7213,8 +7589,7 @@ def multi_task_process(input_dict: Dict[str, Any], repod_dir: str = 'repo'):
                 timeout=MAX_TEST_PATCH_TIMEOUT, 
                 run_id_1=input_dict.get("run_id", ""), 
                 instance_id=input_dict.get("instance_id", ""),
-                search_results=search_results ,
-                hints=hints
+                search_results=search_results 
             )
             test_patch_find_elapsed_time = time.time() - start_time
         except Exception as e:
