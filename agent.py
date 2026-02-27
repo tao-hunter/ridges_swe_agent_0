@@ -1,3 +1,4 @@
+#copy is not allowed
 from __future__ import annotations
 import ast
 import json
@@ -67,6 +68,7 @@ You are a systematic test discovery specialist. Your mission is to identify test
 ✅ **DO:** Validate relevance before including functions
 ✅ **DO:** Keep searching until you find at least ONE relevant test
 ✅ **DO:** Try different search terms, directories, and approaches if initial searches fail
+✅ **DO:** Regular expressions can be used as a useful tool when processing and analyzing strings.
 
 ❌ **DON'T:** Skip the file discovery step and jump to function search
 ❌ **DON'T:** Include tangentially related test functions
@@ -121,6 +123,7 @@ You are a code analysis expert tasked with identifying test functions that direc
 - Always use the exact tool names from the provided documentation (e.g., `search_in_specified_file_v2`, not `search_in_specified_file`)
 - Never guess parameter names; refer to the tool's input schema
 - If a tool is not available, explicitly state it and proceed to the next step
+- Regular expressions can be used as a useful tool when processing and analyzing strings.
 
 **⚡ Multi-Tool Execution Guidance**
 - You CAN and SHOULD call multiple tools in a single step using arrays for `next_tool_name` and `next_tool_args`.
@@ -619,6 +622,148 @@ class SmartCache:
             'most_accessed': sorted(self.access_count.items(), key=lambda x: x[1], reverse=True)[:5],
             'cache_size_mb': sum(len(str(v)) for _, v in self.cache.items()) / (1024 * 1024)
         }
+
+
+class TemperatureAutoController:
+    """Real-time temperature controller that adjusts based on performance metrics"""
+    
+    def __init__(self, initial_temp: float = 0.0, min_temp: float = 0.0, max_temp: float = 1.0):
+        self.current_temp = initial_temp
+        self.min_temp = min_temp
+        self.max_temp = max_temp
+        self.performance_history = []
+        self.error_history = []
+        self.success_history = []
+        self.adjustment_factor = 0.01  # Smaller adjustments for 0.0-0.1 range
+        self.stability_threshold = 3
+        self.last_adjustment_time = time.time()
+        self.adjustment_cooldown = 30  # seconds between adjustments
+        
+        # Performance metrics
+        self.consecutive_errors = 0
+        self.consecutive_successes = 0
+        self.avg_response_quality = 0.5
+        self.response_count = 0
+        
+    def record_performance(self, success: bool, response_quality: float = None, error_type: str = None):
+        """Record performance metrics for temperature adjustment"""
+        timestamp = time.time()
+        
+        if success:
+            self.consecutive_successes += 1
+            self.consecutive_errors = 0
+            self.success_history.append(timestamp)
+        else:
+            self.consecutive_errors += 1
+            self.consecutive_successes = 0
+            self.error_history.append({
+                'timestamp': timestamp,
+                'error_type': error_type or 'unknown'
+            })
+        
+        # Update response quality average
+        if response_quality is not None:
+            self.response_count += 1
+            self.avg_response_quality = ((self.avg_response_quality * (self.response_count - 1)) + response_quality) / self.response_count
+        
+        # Record overall performance
+        self.performance_history.append({
+            'timestamp': timestamp,
+            'success': success,
+            'quality': response_quality,
+            'temperature': self.current_temp
+        })
+        
+        # Keep only recent history (last 100 entries)
+        if len(self.performance_history) > 100:
+            self.performance_history = self.performance_history[-100:]
+        
+        # Trigger temperature adjustment
+        self._adjust_temperature()
+    
+    def _adjust_temperature(self):
+        """Automatically adjust temperature based on performance patterns"""
+        current_time = time.time()
+        
+        # Check cooldown period
+        if current_time - self.last_adjustment_time < self.adjustment_cooldown:
+            return
+        
+        old_temp = self.current_temp
+        adjustment_made = False
+        
+        # Rule 1: Too many consecutive errors -> increase temperature for more creativity
+        if self.consecutive_errors >= 3:
+            if self.current_temp < self.max_temp - 0.005:  # Leave small buffer
+                self.current_temp = min(self.max_temp, self.current_temp + self.adjustment_factor)
+                adjustment_made = True
+                logger.info(f"Temperature increased to {self.current_temp:.4f} due to {self.consecutive_errors} consecutive errors")
+        
+        # Rule 2: Many consecutive successes -> decrease temperature for more consistency
+        elif self.consecutive_successes >= 5:
+            if self.current_temp > self.min_temp + 0.005:  # Leave small buffer
+                self.current_temp = max(self.min_temp, self.current_temp - self.adjustment_factor * 0.5)
+                adjustment_made = True
+                logger.info(f"Temperature decreased to {self.current_temp:.4f} due to {self.consecutive_successes} consecutive successes")
+        
+        # Rule 3: Low response quality -> increase temperature
+        elif self.avg_response_quality < 0.3 and self.response_count > 5:
+            if self.current_temp < self.max_temp - 0.005:
+                self.current_temp = min(self.max_temp, self.current_temp + self.adjustment_factor * 2.0)  # Larger adjustment for quality issues
+                adjustment_made = True
+                logger.info(f"Temperature increased to {self.current_temp:.4f} due to low response quality ({self.avg_response_quality:.3f})")
+        
+        # Rule 4: High response quality but recent errors -> fine-tune temperature
+        elif self.avg_response_quality > 0.7 and len(self.error_history) > 0:
+            recent_errors = [e for e in self.error_history if current_time - e['timestamp'] < 300]  # Last 5 minutes
+            if len(recent_errors) > 2:
+                self.current_temp = max(self.min_temp, min(self.max_temp, self.current_temp + self.adjustment_factor * 0.5))
+                adjustment_made = True
+                logger.info(f"Temperature fine-tuned to {self.current_temp:.4f} due to recent errors despite good quality")
+        
+        # Rule 5: Oscillating performance -> stabilize temperature
+        if len(self.performance_history) >= 10:
+            recent_performance = self.performance_history[-10:]
+            success_rate = sum(1 for p in recent_performance if p['success']) / len(recent_performance)
+            
+            if 0.3 <= success_rate <= 0.7:  # Oscillating performance
+                # Move towards middle temperature (0.05 for 0.0-0.1 range)
+                target_temp = (self.min_temp + self.max_temp) / 2
+                if abs(self.current_temp - target_temp) > 0.01:  # Smaller threshold
+                    self.current_temp = self.current_temp * 0.8 + target_temp * 0.2
+                    adjustment_made = True
+                    logger.info(f"Temperature stabilized to {self.current_temp:.4f} due to oscillating performance")
+        
+        if adjustment_made:
+            self.last_adjustment_time = current_time
+            logger.info(f"Temperature auto-adjusted: {old_temp:.4f} -> {self.current_temp:.4f}")
+    
+    def get_current_temperature(self) -> float:
+        """Get the current temperature value"""
+        return self.current_temp
+    
+    def get_performance_stats(self) -> Dict[str, Any]:
+        """Get performance statistics"""
+        current_time = time.time()
+        recent_errors = [e for e in self.error_history if current_time - e['timestamp'] < 300]
+        recent_successes = [s for s in self.success_history if current_time - s < 300]
+        
+        return {
+            'current_temperature': self.current_temp,
+            'consecutive_errors': self.consecutive_errors,
+            'consecutive_successes': self.consecutive_successes,
+            'avg_response_quality': self.avg_response_quality,
+            'recent_errors_5min': len(recent_errors),
+            'recent_successes_5min': len(recent_successes),
+            'total_responses': self.response_count,
+            'last_adjustment': self.last_adjustment_time
+        }
+    
+    def force_temperature(self, temperature: float):
+        """Force set temperature (for testing or manual override)"""
+        self.current_temp = max(self.min_temp, min(self.max_temp, temperature))
+        self.last_adjustment_time = time.time()
+        logger.info(f"Temperature manually set to {self.current_temp:.4f}")
 
 
 
@@ -1150,6 +1295,8 @@ class Network:
         
     def __init__(self):
         self.cache = SmartCache(default_ttl=600)  # 10 minutes for network responses
+        self.temp_controller = TemperatureAutoController(initial_temp=0.0, min_temp=0.0, max_temp=0.1)
+        logger.info(f"Temperature Auto-Controller initialized with temperature: {self.temp_controller.get_current_temperature():.4f} (Range: 0.0000-0.1000)")
     
     @classmethod
     def is_valid_response(cls,raw_text:str)->bool:
@@ -1196,18 +1343,22 @@ class Network:
     def make_request(cls,messages:list,attempt:int=10)->str:
         url = f"{DEFAULT_PROXY_URL.rstrip('/')}/agents/inference"
         
+        # Get dynamic temperature from controller
+        temp_controller = cls().temp_controller
+        current_temp = temp_controller.get_current_temperature()
+        
         # Cache miss - make the actual request
         request_data = {
                 "run_id": run_id if run_id else "1",
                 "messages": messages,
-                "temperature": 0.0,
+                "temperature": current_temp,
             }
 
         headers = {
             "Content-Type": "application/json"
         }
         request_data['model']=AGENT_MODELS[attempt%len(AGENT_MODELS)]
-        response = requests.post(url, json=request_data, timeout=120, headers=headers)
+        response = requests.post(url, json=request_data, timeout=180, headers=headers)
         print(f"[agent] HTTP {response.status_code} from {url} ({len(response.content)} bytes)")
         
         response.raise_for_status()
@@ -1222,6 +1373,12 @@ class Network:
                 raw_text=response_json
         if type(raw_text) is not dict:
             raw_text=raw_text.lstrip()
+        
+        # Record performance for temperature adjustment
+        success = response.status_code == 200 and raw_text and len(str(raw_text).strip()) > 0
+        response_quality = min(1.0, len(str(raw_text)) / 1000.0) if success else 0.0  # Basic quality metric
+        temp_controller.record_performance(success, response_quality)
+        
         return raw_text
     
     @classmethod
@@ -1268,6 +1425,11 @@ class Network:
             except Exception as e:
                 error_body = str(e)
                 logger.error(f"Error: {error_body}")
+                
+                # Record error for temperature adjustment
+                temp_controller = cls().temp_controller
+                temp_controller.record_performance(False, error_type=error_body)
+                
                 if attempt < max_retries:
                     delay = min(base_delay * (2 ** attempt),8)
                     logger.info(error_body)
@@ -1454,11 +1616,15 @@ class EnhancedNetwork(Network):
     def make_request(cls,messages:list,model:str,attempt:int=10)->str:
         url = f"{DEFAULT_PROXY_URL.rstrip('/')}/agents/inference"
         
+        # Get dynamic temperature from controller
+        temp_controller = Network().temp_controller
+        current_temp = temp_controller.get_current_temperature()
+        
         # Cache miss - make the actual request
         request_data = {
                 "run_id": run_id if run_id else "1",
                 "messages": messages,
-                "temperature": 0.0,
+                "temperature": current_temp,
             }
 
         headers = {
@@ -1467,7 +1633,7 @@ class EnhancedNetwork(Network):
         # request_data['model']=AGENT_MODELS[attempt%len(AGENT_MODELS)]
         request_data['model'] = model
         # print(f"[agent] request_data: {request_data}")
-        response = requests.post(url, json=request_data, timeout=120, headers=headers)
+        response = requests.post(url, json=request_data, timeout=180, headers=headers)
         print(f"[agent] HTTP {response.status_code} from {url} ({len(response.content)} bytes), using model: {model}")
         print(f"[agent] run_id: {run_id}, response: {response.content}")
         
@@ -1483,6 +1649,12 @@ class EnhancedNetwork(Network):
                 raw_text=response_json
         if type(raw_text) is not dict:
             raw_text=raw_text.lstrip()
+        
+        # Record performance for temperature adjustment
+        success = response.status_code == 200 and raw_text and len(str(raw_text).strip()) > 0
+        response_quality = min(1.0, len(str(raw_text)) / 1000.0) if success else 0.0  # Basic quality metric
+        temp_controller.record_performance(success, response_quality)
+        
         return raw_text
 
     @classmethod
@@ -1511,6 +1683,11 @@ class EnhancedNetwork(Network):
             except Exception as e:
                 error_body = str(e)
                 logger.error(f"Error: {error_body}")
+                
+                # Record error for temperature adjustment
+                temp_controller = Network().temp_controller
+                temp_controller.record_performance(False, error_type=error_body)
+                
                 if attempt < max_retries:
                     delay = min(base_delay * (2 ** attempt),8)
                     logger.info(error_body)
@@ -3140,6 +3317,48 @@ Don't forget to add short explanation after "YES" or "NO".
                                   f"Intelligent search failed: {e}")
     
     @tool
+    def get_temperature_stats(self) -> str:
+        '''
+        Get current temperature controller statistics and performance metrics
+        Arguments:
+            None
+        Output:
+            Current temperature settings and performance statistics
+        '''
+        try:
+            network = Network()
+            stats = network.temp_controller.get_performance_stats()
+            
+            return f"""Temperature Auto-Controller Statistics:
+Current Temperature: {stats['current_temperature']:.4f} (Range: 0.0000-0.1000)
+Consecutive Errors: {stats['consecutive_errors']}
+Consecutive Successes: {stats['consecutive_successes']}
+Average Response Quality: {stats['avg_response_quality']:.3f}
+Recent Errors (5min): {stats['recent_errors_5min']}
+Recent Successes (5min): {stats['recent_successes_5min']}
+Total Responses: {stats['total_responses']}
+Last Adjustment: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(stats['last_adjustment']))}
+"""
+        except Exception as e:
+            return f"Error getting temperature stats: {e}"
+    
+    @tool
+    def force_temperature(self, temperature: float) -> str:
+        '''
+        Manually override the temperature setting
+        Arguments:
+            temperature: Temperature value between 0.0 and 0.1
+        Output:
+            Confirmation of temperature setting
+        '''
+        try:
+            network = Network()
+            network.temp_controller.force_temperature(temperature)
+            return f"Temperature manually set to {temperature:.4f}"
+        except Exception as e:
+            return f"Error setting temperature: {e}"
+    
+    @tool
     def enhanced_problem_analysis(self, problem_statement: str) -> str:
         '''
         Enhanced problem analysis combining self-consistency and intelligent search
@@ -4233,7 +4452,7 @@ Don't forget to add short explanation after "YES" or "NO".
         return any(sig.lower() in output_lower for sig in dependency_error_signatures)
 
     @tool
-    def run_repo_tests(self, timeout_secs: int = 420) -> str:
+    def run_repo_tests(self, timeout_secs: int = 630) -> str:
         '''
         Run repository tests to validate edits.
         Arguments:
@@ -4251,19 +4470,19 @@ Don't forget to add short explanation after "YES" or "NO".
             last_test_runner = 'pytest'
             file_paths_str = ", ".join([f"'{f}'" for f in files_to_test])
             command = PYTEST_COMMAND_TEMPLATE.format(file_paths=file_paths_str)
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=90)
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=135)
             output = (result.stdout or "") + (result.stderr or "")
             output = self.analyze_pytest_output(output)
             if test_runner != 'pytest' and self._check_dependency_errors(output):
                 if test_runner_mode == "MODULE":
                     modules = [filepath_to_module(f, REPO_DIR, test_runner) for f in files_to_test]
                     cmd = f"{test_runner} {' '.join(modules)}"
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=90)
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=135)
                     output = (result.stdout or "") + (result.stderr or "")
                 else:
                     files_to_test = [clean_filepath(f, REPO_DIR, test_runner) for f in files_to_test]
                     cmd = f"{test_runner} {' '.join(files_to_test)}"
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=90)
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=135)
                     output = (result.stdout or "") + (result.stderr or "")
                 last_test_runner = test_runner
             return output
@@ -5697,7 +5916,7 @@ ANALYSIS:
 
 
 
-    def _run_repo_tests_with_timeout(self, files_to_test: List[str], timeout_secs: int = 90) -> tuple[str, bool]:
+    def _run_repo_tests_with_timeout(self, files_to_test: List[str], timeout_secs: int = 135) -> tuple[str, bool]:
         global REPO_DIR, last_test_runner, test_runner, test_runner_mode, PYTEST_COMMAND_TEMPLATE
         try:
             last_test_runner = 'pytest'
@@ -6074,7 +6293,7 @@ ANALYSIS:
         
         print(test_files)
 
-        output, result = self._run_repo_tests_with_timeout(list(test_files),timeout_secs=90)
+        output, result = self._run_repo_tests_with_timeout(list(test_files),timeout_secs=135)
         print(output)
 
         if "Successfully ran all tests" not in output:
@@ -6109,7 +6328,7 @@ ANALYSIS:
             return "finish"
 
     @ToolManager.tool
-    def run_repo_tests(self, timeout_secs: int = 90) -> str:
+    def run_repo_tests(self, timeout_secs: int = 135) -> str:
         '''
         Run repository tests for the selected test files to validate edits.
         Arguments:
@@ -6143,7 +6362,7 @@ ANALYSIS:
             self.logs.append(f"Running tests on {files_to_test}")
             # Second call or normal call: Run tests on specific test files
             
-            output, result = self._run_repo_tests_with_timeout(list(files_to_test), timeout_secs=90)
+            output, result = self._run_repo_tests_with_timeout(list(files_to_test), timeout_secs=135)
             if result:
                 self.can_finish = True
                 return output
@@ -6403,7 +6622,7 @@ def check_task_type(input_dict: Dict[str, Any], repod_dir: str = 'repo'):
         if test_runner == 'pytest':
             file_paths_str = ", ".join([f"'{f}'" for f in file_paths])
             command = PYTEST_COMMAND_TEMPLATE.format(file_paths=file_paths_str)
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=90)
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=135)
             output = (result.stdout or "") + (result.stderr or "")
             print(f"--- output ---: {output}")
             analysis_result, _, _ = tool_manager.analyze_pytest_output(output)
@@ -6420,7 +6639,7 @@ def check_task_type(input_dict: Dict[str, Any], repod_dir: str = 'repo'):
             else:
                 file_paths = [clean_filepath(f, repod_dir, test_runner) for f in file_paths]
             cmd = f"{test_runner} {' '.join(file_paths)}"
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=90)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=135)
             output = (result.stdout or "") + (result.stderr or "")
 
         if test_runner != 'pytest':
@@ -6432,7 +6651,7 @@ def check_task_type(input_dict: Dict[str, Any], repod_dir: str = 'repo'):
                 test_runner_mode = 'FILE'
                 file_paths_str = ", ".join([f"'{f}'" for f in file_paths])
                 command = PYTEST_COMMAND_TEMPLATE.format(file_paths=file_paths_str)
-                result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=90)
+                result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=135)
                 output = (result.stdout or "") + (result.stderr or "")
                 analysis_result, _, _ = tool_manager.analyze_pytest_output(output)
                 print(f"analysis_result: {analysis_result}")
