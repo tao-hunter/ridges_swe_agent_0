@@ -1,4 +1,4 @@
-# Cold start agent : Timestampe 1723579200
+"Thanking to https://www.ridges.ai/agent/open-8oFvfHJfFfeHGMLxNOo9Tr6Vz0LXcZCeJffkZZosOk8Bab5?version=82968a5c-9523-41ca-85f0-5d4bc5803b99 "
 
 from __future__ import annotations
 import ast
@@ -39,7 +39,7 @@ You are a code analysis expert tasked with identifying test functions that direc
    - Note expected input/output behaviors
 
 2. **Test Discovery**
-   - Use `search_in_all_files_content_v2` with multiple search strategies
+   - Use `search_in_all_files_content_with_grep` with multiple search strategies
    - Use `analyze_test_coverage` to verify test relevance
    - Use `analyze_dependencies` to understand test relationships
 
@@ -51,10 +51,10 @@ You are a code analysis expert tasked with identifying test functions that direc
    - Confirm test functions fail with the described issue
 
 **🛠️ Available Tools**
-- `search_in_all_files_content_v2`: Find test patterns across the repo
+- `search_in_all_files_content_with_grep`: Find test patterns across the repo
 - `analyze_test_coverage`: Verify test coverage of proposed functions
 - `analyze_dependencies`: Understand test function relationships
-- `get_file_content`: Retrieve test function source code
+- `read_file`: Retrieve test function source code
 - `test_patch_find_finish`: Finalize test function list
 
 **⚠️ Critical Rules**
@@ -62,7 +62,7 @@ You are a code analysis expert tasked with identifying test functions that direc
 - Use `analyze_git_history` to understand historical context of test failures
 - Prioritize tests with clear assertions and minimal setup
 - If no relevant tests exist, return the most likely candidate with `analyze_test_coverage` validation
-- Always use the exact tool names from the provided documentation (e.g., `search_in_specified_file_v2`, not `search_in_specified_file`)
+- Always use the exact tool names from the provided documentation (e.g., `search_in_specified_file`, not `search_in_specified_file`)
 - Never guess parameter names; refer to the tool's input schema
 - If a tool is not available, explicitly state it and proceed to the next step
 
@@ -84,7 +84,7 @@ You are a code analysis expert tasked with identifying test functions that direc
    - Note expected input/output behaviors
 
 2. **Test Discovery**
-   - Use `search_in_all_files_content_v2` with multiple search strategies: **TRY DIVERSE SEARCH TERMS** from the problem statement, with **key words**, **specified functions or classes**, etc.
+   - Use `search_in_all_files_content_with_grep` with multiple search strategies: **TRY DIVERSE SEARCH TERMS** from the problem statement, with **key words**, **specified functions or classes**, etc.
    - Try to search the codebase for distinctive variables, literals, special characters, etc.
    - Use `analyze_dependencies` to understand test relationships
 
@@ -95,9 +95,9 @@ You are a code analysis expert tasked with identifying test functions that direc
    - Confirm test functions fail with the described issue
 
 **🛠️ Available Tools**
-- `search_in_all_files_content_v2`: Find test patterns across the repo
+- `search_in_all_files_content_with_grep`: Find test patterns across the repo
 - `analyze_dependencies`: Understand test function relationships
-- `get_file_content`: Retrieve test function source code
+- `read_file`: Retrieve test function source code
 - `filter_test_func_names`: Filter test functions.
 - `test_patch_find_finish`: Finalize test function list
 - `parallel_codebase_analysis`: Perform comprehensive analysis using parallel execution
@@ -109,7 +109,7 @@ You are a code analysis expert tasked with identifying test functions that direc
 **⚠️ Critical Rules**
 - Only return test functions that explicitly validate the problem
 - Prioritize tests with clear assertions and minimal setup
-- Always use the exact tool names from the provided documentation (e.g., `search_in_specified_file_v2`, not `search_in_specified_file`)
+- Always use the exact tool names from the provided documentation (e.g., `search_in_specified_file`, not `search_in_specified_file`)
 - Never guess parameter names; refer to the tool's input schema
 - If a tool is not available, explicitly state it and proceed to the next step
 
@@ -118,21 +118,20 @@ You are a code analysis expert tasked with identifying test functions that direc
 - Prefer batching independent operations together to reduce total steps and latency.
 - Tools will be executed one by one in the order of `next_tool_name` and `next_tool_args`.
 - Good candidates to batch in one step:
-  - Multiple repo searches with `search_in_all_files_content_v2` (different patterns/terms)
-  - Multiple file reads with `get_file_content` (different `file_path`s)
+  - Multiple repo searches with `search_in_all_files_content_with_grep` (different patterns/terms)
+  - Multiple file reads with `read_file` (different `file_path`s)
   - Mixed reads + searches (e.g., read 2 files and run 2 searches concurrently)
-  - Per-file analyses across a set of files (e.g., `detect_code_smells`, `get_code_quality_metrics`) — use parallel arrays and keep index alignment
 - Best practices for efficient multi-tool usage:
   - `filter_test_func_names` should be called **individually**.
   - Keep arrays ordered; results are returned in the same order as tools
   - Deduplicate identical tool calls; do not call the same tool with identical args twice
   - Use broadcasting for shared args by supplying a single args object when appropriate
   - Cap one step to a reasonable batch size (e.g., 3–8 calls) to avoid timeouts; if more items exist, paginate across steps
-  - Prefer targeted reads: when possible, use `search_in_specified_file_v2` or `get_file_content` with `search_term`/line ranges instead of reading whole files
+  - Prefer targeted reads: when possible, use `search_in_specified_file` or `read_file` with `search_term`/line ranges instead of reading whole files
   - After an initial search step yields candidate file paths, in the next step batch-read those files and batch-run analyses together
 - Example (mixing tools):
   next_thought: "Search for target symbol and read top candidates concurrently"
-  next_tool_name: ["search_in_all_files_content_v2", "get_file_content", "get_file_content"]
+  next_tool_name: ["search_in_all_files_content_with_grep", "read_file", "read_file"]
   next_tool_args: [
     {{ "grep_search_command": "grep -rn --include='*.py' . -e 'def target_fn\\('\"", "test_files_only": false }},
     {{ "file_path": "pkg/module_a.py" }},
@@ -158,7 +157,7 @@ Your task: Fix all the failures from `run_repo_tests` test.
 
 ## 🔹 Workflow
 1. Use `run_repo_tests` to run the test.
-2. Analyze the failure and propose fixes carefully. You can use relevant tools to read and understand the code like `search_in_all_files_content_v2`, `get_file_content`, `search_in_specified_file_v2`, `search_recurive_in_all_files_in_directory`, and `analyze_dependencies`.
+2. Analyze the failure and propose fixes carefully. You can use relevant tools to read and understand the code like `search_in_all_files_content_with_grep`, `read_file`, `search_in_specified_file`, `search_recurive_in_all_files_in_directory`, and `analyze_dependencies`.
 3. Use `apply_code_edit_and_run_repo_tests` to fix the code and run the test immediately. You can add debug prints and run tests too.
 4. Use `apply_code_edit` to fix the code, but not run the test immediately.
 5. Use `run_repo_tests` to run the test again.
@@ -229,7 +228,6 @@ Your task: Make the necessary code changes to resolve the issue and pass the pro
 **✅ Validation** 
 1. Run `validate_solution` to confirm test function results
 2. Use `run_repo_tests` to verify fixes
-3. Use `detect_code_smells` to verify no new smells introduced
 ---
 
 You have access to the following tools:
@@ -270,7 +268,7 @@ FORMAT_PROMPT_V0=textwrap.dedent("""
    }
 
 4. **Invalid Format Examples** (Avoid These):
-   - Incorrect next_tool_name such as "search_in_all_files_content" instead correct tool name - "search_in_all_files_content_v2"
+   - Incorrect next_tool_name such as "search_in_all_files_content" instead correct tool name - "search_in_all_files_content_with_grep"
    - Missing any of the three required fields
    - JSON syntax errors in next_tool_args
    - Extra text outside the triplet format
@@ -315,7 +313,7 @@ FORMAT_PROMPT_V1=textwrap.dedent("""
    next_tool_args: [{}, {}]
 
 4. **Invalid Format Examples** (Avoid These):
-   - Incorrect next_tool_name such as "search_in_all_files_content" instead correct tool name - "search_in_all_files_content_v2"
+   - Incorrect next_tool_name such as "search_in_all_files_content" instead correct tool name - "search_in_all_files_content_with_grep"
    - Missing any of the three required fields
    - JSON syntax errors in next_tool_args
    - Extra text outside the triplet format
@@ -647,9 +645,7 @@ class ParallelToolExecutor:
         tasks = {
             'test_coverage': lambda: self.tool_manager.analyze_test_coverage(test_func_names),
             'dependencies': lambda: self.tool_manager.analyze_dependencies(file_path),
-            'code_smells': lambda: self.tool_manager.detect_code_smells(file_path),
             'git_history': lambda: self.tool_manager.analyze_git_history(file_path),
-            'code_quality': lambda: self.tool_manager.get_code_quality_metrics(file_path)
         }
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -684,7 +680,7 @@ class ParallelFileSearcher:
         
         def search_single_term(term: str) -> tuple[str, str]:
             try:
-                result = self.tool_manager.search_in_all_files_content_v2(
+                result = self.tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{term}'"
                 )
                 return term, result
@@ -738,16 +734,16 @@ class ParallelFileProcessor:
     def get_multiple_file_contents_parallel(self, file_paths: List[str]) -> Dict[str, str]:
         """Get contents of multiple files in parallel"""
         
-        def get_file_content(file_path: str) -> tuple[str, str]:
+        def read_file(file_path: str) -> tuple[str, str]:
             try:
-                content = self.tool_manager.get_file_content(file_path)
+                content = self.tool_manager.read_file(file_path)
                 return file_path, content
             except Exception as e:
                 return file_path, f"Error reading {file_path}: {e}"
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(file_paths), 5)) as executor:
             future_to_file = {
-                executor.submit(get_file_content, file_path): file_path 
+                executor.submit(read_file, file_path): file_path 
                 for file_path in file_paths
             }
             
@@ -852,9 +848,7 @@ class DependencyAwareParallelExecutor:
         """Analyze a single file with multiple tools"""
         try:
             return {
-                'content': self.tool_manager.get_file_content(file_path, limit=1000),
-                'smells': self.tool_manager.detect_code_smells(file_path),
-                'quality': self.tool_manager.get_code_quality_metrics(file_path)
+                'content': self.tool_manager.read_file(file_path, limit=1000),
             }
         except Exception as e:
             return {'error': str(e)}
@@ -2004,7 +1998,7 @@ class IntelligentSearch:
         search_results = []
         for term in key_terms:
             try:
-                result = tool_manager.search_in_all_files_content_v2(
+                result = tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{term}'",
                     test_files_only=False
                 )
@@ -2035,7 +2029,7 @@ class IntelligentSearch:
         pattern_results = []
         for pattern in patterns:
             try:
-                result = tool_manager.search_in_all_files_content_v2(
+                result = tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{pattern}'",
                     test_files_only=False
                 )
@@ -2066,7 +2060,7 @@ class IntelligentSearch:
         dep_results = []
         for term in dependency_terms:
             try:
-                result = tool_manager.search_in_all_files_content_v2(
+                result = tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{term}'",
                     test_files_only=False
                 )
@@ -2103,7 +2097,7 @@ class IntelligentSearch:
         context_results = []
         for term in contextual_terms:
             try:
-                result = tool_manager.search_in_all_files_content_v2(
+                result = tool_manager.search_in_all_files_content_with_grep(
                     grep_search_command=f"grep -rn --include='*.py' . -e '{term}'",
                     test_files_only=False
                 )
@@ -2135,7 +2129,7 @@ class IntelligentSearch:
     def _default_search(self, problem: str, context: dict, tool_manager) -> dict:
         """Default search strategy"""
         try:
-            result = tool_manager.search_in_all_files_content_v2(
+            result = tool_manager.search_in_all_files_content_with_grep(
                 grep_search_command="grep -rn --include='*.py' . -e '.*'",
                 test_files_only=False
             )
@@ -2355,6 +2349,7 @@ class IntelligentSearch:
             summary += "\n"
         
         return summary
+
 class ToolManager:
     TOOL_LIST={}
     test_files = []
@@ -2568,7 +2563,7 @@ class ToolManager:
         return tool_method
     
     
-    def _get_file_content(
+    def _read_file(
         self,
         file_path: str,
         search_start_line: int = None,
@@ -2587,7 +2582,7 @@ class ToolManager:
         # If search term is provided, use specialized search
         if search_term:
             logger.debug(f"search_term specified: {search_term}, searching in v2")
-            return self.search_in_specified_file_v2(file_path, search_term)
+            return self.search_in_specified_file(file_path, search_term)
 
         # Adjust start/end lines if they fall within a function
         func_ranges = self.get_function_ranges(file_path)
@@ -2620,7 +2615,7 @@ class ToolManager:
 
     
     @tool
-    def get_file_content(self,file_path: str, search_start_line: int = None, search_end_line: int = None, search_term: str = None)->str:
+    def read_file(self,file_path: str, search_start_line: int = None, search_end_line: int = None, search_term: str = None)->str:
        
         '''
         Retrieves file contents with optional filtering based on search term and line numbers
@@ -2630,7 +2625,7 @@ class ToolManager:
             search_end_line: optional end line number to end extraction (1-indexed)
             search_term: optional text pattern to filter matching lines
         '''
-        return self._get_file_content(file_path,search_start_line,search_end_line,search_term,limit=5000)
+        return self._read_file(file_path,search_start_line,search_end_line,search_term,limit=5000)
     
     @tool
     def analyze_test_coverage(self, test_func_names: List[str]) -> str:
@@ -2702,53 +2697,15 @@ class ToolManager:
             Git history analysis with commit messages and changes
         '''
         try:
-            result = subprocess.run(["git", "log", commit_range, "--pretty=format:%H%n%an%n%ad%n%s%n%b", "--", file_path],
+            result = subprocess.run(["git", "diff", commit_range, "--", file_path],
                                   capture_output=True, text=True, check=True)
-            commits = result.stdout.split("\n\n")
-            analysis = []
-            
-            for commit in commits:
-                lines = commit.split("\n")
-                if len(lines) >= 4:
-                    analysis.append(f"Commit: {lines[0]}")
-                    analysis.append(f"Author: {lines[1]}")
-                    analysis.append(f"Date: {lines[2]}")
-                    analysis.append(f"Message: {lines[3]}")
-                    analysis.append("-" * 50)
+            analysis = result.stdout
             
             return "\n".join(analysis) if analysis else "No git history found for this file"
         except Exception as e:
             raise ToolManager.Error(ToolManager.Error.ErrorType.GIT_HISTORY_ERROR.name, 
                                   f"Git history analysis failed: {e}")
-    
-    @tool
-    def get_code_quality_metrics(self, file_path: str) -> str:
-        '''
-        Calculate code quality metrics for a file
-        Arguments:
-            file_path: Path to the file to analyze
-        Output:
-            Code quality metrics including cyclomatic complexity, maintainability index, etc.
-        '''
-        try:
-            # Use radon for code complexity analysis
-            result = subprocess.run(["radon", "cc", "-s", file_path], 
-                                  capture_output=True, text=True, check=True)
-            
-            metrics = {
-                "cyclomatic_complexity": result.stdout,
-                "maintainability_index": "N/A",
-                "halstead_metrics": "N/A"
-            }
-            
-            # Add maintainability index analysis if needed
-            # Add halstead metrics analysis if needed
-            
-            return json.dumps(metrics, indent=2)
-        except Exception as e:
-            raise ToolManager.Error(ToolManager.Error.ErrorType.CODE_QUALITY_ERROR.name, 
-                                  f"Code quality metrics failed: {e}")
-    
+     
     @tool
     def validate_solution(self, file_path: str, test_func_names: List[str]) -> str:
         '''
@@ -2862,42 +2819,7 @@ class ToolManager:
         except Exception as e:
             raise ToolManager.Error(ToolManager.Error.ErrorType.UNKNOWN.name, 
                                   f"Solution proposal failed: {e}")
-    
-    @tool        
-    def detect_code_smells(self, file_path: str) -> str:
-        '''
-        Detect code smells and anti-patterns in a file
-        Arguments:
-            file_path: Path to the file to analyze
-        Output:
-            List of code smells with line numbers and suggestions
-        '''
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            smells = []
-            
-            # Detect long functions
-            tree = ast.parse(content)
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if node.body and len(node.body) > 20:  # Arbitrary threshold
-                        smells.append(f"Long function: {node.name} (lines {node.lineno}-{node.end_lineno})")
-            
-            # Detect magic numbers
-            for line_num, line in enumerate(content.splitlines(), 1):
-                if re.search(r'\b\d+\b', line):
-                    smells.append(f"Magic number detected on line {line_num}: {line.strip()}")
-            
-            # Detect duplicated code
-            if "duplicate" in content.lower():
-                smells.append("Potential code duplication detected")
-            
-            return "\n".join(smells) if smells else "No code smells detected"
-        except Exception as e:
-            raise ToolManager.Error(ToolManager.Error.ErrorType.CODE_SMELL_DETECTION_ERROR.name, 
-                                  f"Code smell detection failed: {e}")
+
     
     @tool
     def execute_self_consistency_analysis(self, problem_statement: str, context: dict = None) -> str:
@@ -3147,7 +3069,7 @@ class ToolManager:
                     return "\n".join(lines[start_line - 1:end_line])
 
         raise ToolManager.Error(ToolManager.Error.ErrorType.SEARCH_TERM_NOT_FOUND.name, f"Function '{function_name}' not found in '{file_path}'")
-    def search_in_all_files_content_v2(self, grep_search_command: str, test_files_only: bool = False) -> str:
+    def search_in_all_files_content_with_grep(self, grep_search_command: str, test_files_only: bool = False) -> str:
         '''
         Performs grep search across all files in the codebase
         Arguments:
@@ -3545,7 +3467,7 @@ class ToolManager:
         return Utils.limit_strings("\n\n".join(chunks), n=max_output_lines)
 
     @tool
-    def search_in_specified_file_v2(self,file_path: str, search_term: str)->str:
+    def search_in_specified_file(self,file_path: str, search_term: str)->str:
         '''
         Locates text patterns within a specific file
         Arguments:
@@ -3759,7 +3681,7 @@ class ToolManager:
             logger.error(f"file '{file_path}' does not exist.")
             raise ToolManager.Error(ToolManager.Error.ErrorType.FILE_NOT_FOUND.name,f"Error: file '{file_path}' does not exist.")
         
-        original=self._get_file_content(file_path,limit=-1)
+        original=self._read_file(file_path,limit=-1)
 
         match original.count(search):
             case 0:
@@ -4578,9 +4500,7 @@ class ToolManager:
         """Analyze a single file with multiple tools"""
         try:
             return {
-                'content': self.get_file_content(file_path, limit=1000),
-                'smells': self.detect_code_smells(file_path),
-                'quality': self.get_code_quality_metrics(file_path)
+                'content': self.read_file(file_path, limit=1000),
             }
         except Exception as e:
             return {'error': str(e)}
@@ -4645,7 +4565,7 @@ class EnhancedToolManager(ToolManager):
         return '\n\n'.join([json.dumps(tool_metadata, ensure_ascii=False) for _,tool_metadata in self.TOOL_LIST.items()])
     
     @ToolManager.tool
-    def get_file_content(self,file_path: str, search_start_line: int = None, search_end_line: int = None, search_term: str = None)->str:
+    def read_file(self,file_path: str, search_start_line: int = None, search_end_line: int = None, search_term: str = None)->str:
        
         '''
         Retrieves file contents with optional filtering based on search term and line numbers
@@ -4657,7 +4577,7 @@ class EnhancedToolManager(ToolManager):
         '''
         if file_path in self.blacklisted_test_files:
             return "You can't use this file, search other files"
-        return self._get_file_content(file_path,search_start_line,search_end_line,search_term,limit=5000)
+        return self._read_file(file_path,search_start_line,search_end_line,search_term,limit=5000)
     
     def save_file(self,file_path: str, content: str)->str:
         '''
@@ -5393,7 +5313,7 @@ class EnhancedToolManager(ToolManager):
             return "ERROR: tests timed out.", False
 
     @ToolManager.tool
-    def search_in_all_files_content_v2(self, grep_search_command: str, test_files_only: bool = False, sort_by_occurrences: bool = True) -> str:
+    def search_in_all_files_content_with_grep(self, grep_search_command: str, test_files_only: bool = False, sort_by_occurrences: bool = True) -> str:
         '''
         Performs grep search across all files in the codebase. Try to search the codebase for distinctive variables, literals, special letters, numbers, characters one by one to not miss any.
         Arguments:
@@ -5434,7 +5354,7 @@ class EnhancedToolManager(ToolManager):
         return output
 
     @ToolManager.tool
-    def search_in_specified_file_v2(self,file_path: str, search_term: str)->str:
+    def search_in_specified_file(self,file_path: str, search_term: str)->str:
         '''
         Locates text patterns within a specific file
         Arguments:
@@ -5607,7 +5527,7 @@ class EnhancedToolManager(ToolManager):
         if "test" in file_path.lower() and "pytest" not in file_path.lower():
             raise ToolManager.Error(ToolManager.Error.ErrorType.INVALID_TOOL_CALL.name,f"Error: You cannot change test files. Try another way.")
         
-        original=self._get_file_content(file_path,limit=-1)
+        original=self._read_file(file_path,limit=-1)
 
         match original.count(search):
             case 0:
@@ -5683,7 +5603,7 @@ class EnhancedToolManager(ToolManager):
         if not self.is_test_func_filtered:
             return "Please filter test functions before you can finish. Call `filter_test_func_names` tool now."
         elif self.is_test_func_filtered and len(self.filtered_test_func_names) == 0:
-            return "No test functions relevant to the issue found. You should find at least one test function relevant to the issue. TRY different searches using `search_in_all_files_content_v2` tool."
+            return "No test functions relevant to the issue found. You should find at least one test function relevant to the issue. TRY different searches using `search_in_all_files_content_with_grep` tool."
         else:
             return "finish"
 
@@ -5981,9 +5901,13 @@ def pytest_not_available_task_process(input_dict: Dict[str, Any], repod_dir: str
         test_func_codes = []
         test_file_paths = []
         for test_func_name in test_func_names:
-            file_path, function_name = test_func_name.split(" - ")
-            function_name = function_name.split(".")[-1]
-            test_func_codes.append(f"```{file_path}\n\n{tool_manager.get_function_body(file_path, function_name)}\n```")
+            try:
+                file_path, function_name = test_func_name.split(" - ")
+                
+                function_name = function_name.split(".")[-1]
+                test_func_codes.append(f"```{file_path}\n\n{tool_manager.get_function_body(file_path, function_name)}\n```")
+            except Exception as e:
+                file_path = test_func_name
             if file_path not in test_file_paths:
                 test_file_paths.append(file_path)
 
@@ -6034,11 +5958,11 @@ def execute_test_patch_find_workflow_v0(problem_statement: str, *, timeout: int,
     cot=COT(latest_observations_to_keep=500)
     tool_manager=ToolManager(
         available_tools=[
-            "search_in_all_files_content_v2",
+            "search_in_all_files_content_with_grep",
             "analyze_test_coverage",
             "analyze_dependencies",
-            "get_file_content",
-            "search_in_specified_file_v2",
+            "read_file",
+            "search_in_specified_file",
             "search_recurive_in_all_files_in_directory",
             "test_patch_find_finish",
             "sort_test_func_names",
@@ -6155,12 +6079,10 @@ def execute_fix_workflow_v0(problem_statement: str, *, timeout: int, run_id_1: s
     
     tool_manager=ToolManager(
         available_tools=[
-            "search_in_all_files_content_v2",
+            "search_in_all_files_content_with_grep",
             "analyze_test_coverage",
             "analyze_dependencies",
-            "detect_code_smells",
             "analyze_git_history",
-            "get_code_quality_metrics",
             "validate_solution",
             "propose_solutions",
             "compare_solutions",
@@ -6552,10 +6474,10 @@ def execute_test_patch_find_workflow_v1(problem_statement: str, *, timeout: int,
         current_retries += 1
         # Build tool manager and prompts
         tool_manager = EnhancedToolManager(available_tools=[
-            "search_in_all_files_content_v2",
+            "search_in_all_files_content_with_grep",
             "analyze_dependencies", 
-            "get_file_content",
-            "search_in_specified_file_v2",
+            "read_file",
+            "search_in_specified_file",
             "search_recurive_in_all_files_in_directory",
             "test_patch_find_finish",
             # "sort_test_func_names",
@@ -6610,9 +6532,9 @@ def execute_fix_workflow_v1(problem_statement: str, *, timeout: int, run_id_1: s
     # Build tool manager and prompts
     tool_manager = EnhancedToolManager(test_files=test_file_paths, available_tools=[
         "run_repo_tests",
-        "search_in_all_files_content_v2",
-        "get_file_content",
-        "search_in_specified_file_v2",
+        "search_in_all_files_content_with_grep",
+        "read_file",
+        "search_in_specified_file",
         "search_recurive_in_all_files_in_directory",
         "analyze_dependencies",
         "apply_code_edit",
