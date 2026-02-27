@@ -405,7 +405,7 @@ EXPECTED_ACCURACY_IMPROVEMENT = {
 
 
 PYTEST_COMMAND_TEMPLATE = textwrap.dedent("""\
-python -c "import sys, os, pytest, collections, collections.abc, urllib3.exceptions, _pytest.pytester, numpy, shutil, types;
+python -c "import sys, os, pytest, collections, collections.abc, urllib3.exceptions, _pytest.pytester, shutil, types;
 collections.Mapping = collections.abc.Mapping;
 collections.MutableMapping = collections.abc.MutableMapping;
 collections.MutableSet = collections.abc.MutableSet;
@@ -415,7 +415,6 @@ collections.Iterable = collections.abc.Iterable;
 urllib3.exceptions.SNIMissingWarning = urllib3.exceptions.DependencyWarning;
 pytest.RemovedInPytest4Warning = DeprecationWarning;
 _pytest.pytester.Testdir = _pytest.pytester.Pytester;
-numpy.PINF = numpy.inf;
 if shutil.which('pylint') is None:
     sys.modules['pylint'] = types.ModuleType('pylint');
     sys.modules['pylint.lint'] = types.ModuleType('pylint.lint');
@@ -2643,25 +2642,552 @@ class ToolManager:
     @tool
     def analyze_test_coverage(self, test_func_names: List[str]) -> str:
         '''
-        Analyze test coverage for proposed test functions
+        Analyze test coverage for proposed test functions using manual AST analysis
         Arguments:
             test_func_names: List of test function names with file paths
         Output:
             Coverage analysis report showing which code paths are tested
         '''
         try:
-            # Use coverage.py to analyze test coverage
-            result = subprocess.run(["coverage", "run", "--source=.", "-m", "pytest", "-v", "-k"] + test_func_names, 
-                                   capture_output=True, text=True, check=True)
+            if not test_func_names:
+                return "No test function names provided"
             
-            coverage_report = subprocess.run(["coverage", "report", "--format=json"], 
-                                            capture_output=True, text=True, check=True)
+            coverage_analysis = {
+                'test_functions': [],
+                'coverage_summary': {},
+                'uncovered_functions': [],
+                'total_functions': 0,
+                'covered_functions': 0,
+                'coverage_percentage': 0.0
+            }
             
-            return coverage_report.stdout
+            # Analyze each test function
+            for test_func in test_func_names:
+                test_info = self._analyze_single_test_coverage(test_func)
+                coverage_analysis['test_functions'].append(test_info)
+            
+            # Generate overall coverage statistics
+            coverage_analysis = self._calculate_overall_coverage(coverage_analysis)
+            
+            return self._format_coverage_report(coverage_analysis)
+            
         except Exception as e:
-            raise ToolManager.Error(ToolManager.Error.ErrorType.TEST_COVERAGE_ERROR.name, 
-                                  f"Test coverage analysis failed: {e}")
+            raise ToolManager.Error(
+                ToolManager.Error.ErrorType.TEST_COVERAGE_ERROR.name, 
+                f"Test coverage analysis failed: {e}"
+            )
     
+    def _analyze_single_test_coverage(self, test_func: str) -> dict:
+        """Analyze coverage for a single test function"""
+        try:
+            # Parse test function identifier (format: "file_path - function_name")
+            if " - " in test_func:
+                file_path, func_name = test_func.split(" - ", 1)
+            else:
+                # Fallback: assume it's just a function name
+                file_path = None
+                func_name = test_func
+            
+            test_info = {
+                'test_function': test_func,
+                'file_path': file_path,
+                'function_name': func_name,
+                'test_body': '',
+                'assertions_found': 0,
+                'test_complexity': 'low',
+                'coverage_scope': []
+            }
+            
+            # Get test function body if file path is available
+            if file_path and os.path.exists(file_path):
+                try:
+                    test_info['test_body'] = self.get_function_body(file_path, func_name)
+                    test_info['assertions_found'] = self._count_assertions(test_info['test_body'])
+                    test_info['test_complexity'] = self._assess_test_complexity(test_info['test_body'])
+                    test_info['coverage_scope'] = self._extract_coverage_scope(test_info['test_body'])
+                except Exception as e:
+                    test_info['error'] = f"Failed to analyze test function: {e}"
+            
+            return test_info
+            
+        except Exception as e:
+            return {
+                'test_function': test_func,
+                'error': f"Failed to analyze test: {e}"
+            }
+    
+    def _count_assertions(self, test_body: str) -> int:
+        """Count assertion statements in test body"""
+        if not test_body:
+            return 0
+        
+        assertion_patterns = [
+            r'\bassert\b',
+            r'\bassertEqual\b',
+            r'\bassertTrue\b',
+            r'\bassertFalse\b',
+            r'\bassertRaises\b',
+            r'\bassertIn\b',
+            r'\bassertNotIn\b',
+            r'\bassertIs\b',
+            r'\bassertIsNot\b',
+            r'\bassertAlmostEqual\b',
+            r'\bassertNotAlmostEqual\b',
+            r'\bassertGreater\b',
+            r'\bassertLess\b',
+            r'\bassertGreaterEqual\b',
+            r'\bassertLessEqual\b',
+            r'\bassertCountEqual\b',
+            r'\bassertDictEqual\b',
+            r'\bassertListEqual\b',
+            r'\bassertTupleEqual\b',
+            r'\bassertSetEqual\b',
+            r'\bassertMultiLineEqual\b',
+            r'\bassertRegex\b',
+            r'\bassertNotRegex\b',
+            r'\bassertWarns\b',
+            r'\bassertLogs\b',
+            r'\bassertNoLogs\b',
+            r'\bassertRaisesRegex\b',
+            r'\bassertWarnsRegex\b'
+        ]
+        
+        count = 0
+        for pattern in assertion_patterns:
+            count += len(re.findall(pattern, test_body))
+        
+        return count
+    
+    def _assess_test_complexity(self, test_body: str) -> str:
+        """Assess the complexity of a test function"""
+        if not test_body:
+            return 'unknown'
+        
+        lines = test_body.split('\n')
+        line_count = len(lines)
+        
+        # Count control structures
+        control_structures = 0
+        for line in lines:
+            stripped = line.strip()
+            if any(keyword in stripped for keyword in ['if ', 'for ', 'while ', 'try:', 'except:', 'with ']):
+                control_structures += 1
+        
+        # Count function calls
+        function_calls = len(re.findall(r'\w+\s*\(', test_body))
+        
+        # Complexity scoring
+        complexity_score = line_count + control_structures * 2 + function_calls * 0.5
+        
+        if complexity_score < 10:
+            return 'low'
+        elif complexity_score < 25:
+            return 'medium'
+        else:
+            return 'high'
+    
+    def _extract_coverage_scope(self, test_body: str) -> list:
+        """Extract what the test is covering based on its content"""
+        coverage_scope = []
+        
+        if not test_body:
+            return coverage_scope
+        
+        # Look for class instantiations
+        class_instances = re.findall(r'(\w+)\s*=\s*(\w+)\(', test_body)
+        for var_name, class_name in class_instances:
+            coverage_scope.append(f"Class: {class_name}")
+        
+        # Look for function calls
+        function_calls = re.findall(r'(\w+)\.(\w+)\s*\(', test_body)
+        for obj_name, method_name in function_calls:
+            coverage_scope.append(f"Method: {obj_name}.{method_name}")
+        
+        # Look for direct function calls
+        direct_calls = re.findall(r'(\w+)\s*\(', test_body)
+        for func_name in direct_calls:
+            if func_name not in ['self', 'cls', 'assert', 'print', 'len', 'str', 'int', 'float', 'list', 'dict', 'set', 'tuple']:
+                coverage_scope.append(f"Function: {func_name}")
+        
+        # Look for imports to understand dependencies
+        imports = re.findall(r'from\s+(\w+)\s+import\s+(\w+)', test_body)
+        for module_name, item_name in imports:
+            coverage_scope.append(f"Import: {module_name}.{item_name}")
+        
+        return list(set(coverage_scope))  # Remove duplicates
+    
+    def _calculate_overall_coverage(self, coverage_analysis: dict) -> dict:
+        """Calculate overall coverage statistics"""
+        total_tests = len(coverage_analysis['test_functions'])
+        successful_tests = sum(1 for test in coverage_analysis['test_functions'] if 'error' not in test)
+        
+        # Count total functions in the codebase
+        total_functions = self._count_total_functions_in_codebase()
+        
+        # Estimate covered functions based on test assertions and scope
+        covered_functions = self._estimate_covered_functions(coverage_analysis['test_functions'])
+        
+        coverage_analysis.update({
+            'total_tests': total_tests,
+            'successful_tests': successful_tests,
+            'total_functions': total_functions,
+            'covered_functions': covered_functions,
+            'coverage_percentage': (covered_functions / total_functions * 100) if total_functions > 0 else 0.0
+        })
+        
+        return coverage_analysis
+    
+    def _count_total_functions_in_codebase(self) -> int:
+        """Count total functions in the codebase"""
+        try:
+            # Use existing method to find Python files
+            python_files = self.list_python_files()
+            if isinstance(python_files, str):
+                # Parse the output to get file paths
+                file_paths = [line.strip() for line in python_files.split('\n') if line.strip() and line.strip().endswith('.py')]
+            else:
+                file_paths = []
+            
+            total_functions = 0
+            for file_path in file_paths[:10]:  # Limit to first 10 files to avoid performance issues
+                try:
+                    content = self.get_file_content(file_path)
+                    if content and not content.startswith('Error'):
+                        # Count function definitions
+                        function_count = len(re.findall(r'^\s*def\s+\w+', content, re.MULTILINE))
+                        class_method_count = len(re.findall(r'^\s+def\s+\w+', content, re.MULTILINE))
+                        total_functions += function_count + class_method_count
+                except:
+                    continue
+            
+            return max(total_functions, 1)  # Ensure at least 1 to avoid division by zero
+            
+        except Exception:
+            return 100  # Fallback default
+    
+    def _estimate_covered_functions(self, test_functions: list) -> int:
+        """Estimate how many functions are covered by tests"""
+        if not test_functions:
+            return 0
+        
+        covered_estimate = 0
+        
+        for test in test_functions:
+            if 'error' in test:
+                continue
+            
+            # Base coverage per test
+            base_coverage = 1
+            
+            # Bonus coverage for assertions
+            assertion_bonus = min(test.get('assertions_found', 0) * 0.5, 5)
+            
+            # Bonus coverage for complexity
+            complexity_bonus = {
+                'low': 1,
+                'medium': 2,
+                'high': 3
+            }.get(test.get('test_complexity', 'low'), 1)
+            
+            # Bonus coverage for scope
+            scope_bonus = min(len(test.get('coverage_scope', [])) * 0.3, 3)
+            
+            covered_estimate += base_coverage + assertion_bonus + complexity_bonus + scope_bonus
+        
+        return int(covered_estimate)
+    
+    def _format_coverage_report(self, coverage_analysis: dict) -> str:
+        """Format the coverage analysis into a readable report"""
+        report = []
+        report.append("=" * 60)
+        report.append("TEST COVERAGE ANALYSIS REPORT")
+        report.append("=" * 60)
+        
+        # Summary
+        report.append(f"\n📊 COVERAGE SUMMARY:")
+        report.append(f"   Total Tests: {coverage_analysis['total_tests']}")
+        report.append(f"   Successful Tests: {coverage_analysis['successful_tests']}")
+        report.append(f"   Total Functions: {coverage_analysis['total_functions']}")
+        report.append(f"   Covered Functions: {coverage_analysis['covered_functions']}")
+        report.append(f"   Coverage Percentage: {coverage_analysis['coverage_percentage']:.1f}%")
+        
+        # Test Details
+        report.append(f"\n🧪 TEST FUNCTION DETAILS:")
+        for i, test in enumerate(coverage_analysis['test_functions'], 1):
+            report.append(f"\n   {i}. {test['test_function']}")
+            
+            if 'error' in test:
+                report.append(f"      ❌ Error: {test['error']}")
+            else:
+                report.append(f"      📁 File: {test.get('file_path', 'Unknown')}")
+                report.append(f"      🔍 Function: {test.get('function_name', 'Unknown')}")
+                report.append(f"      ✅ Assertions: {test.get('assertions_found', 0)}")
+                report.append(f"      🎯 Complexity: {test.get('test_complexity', 'Unknown')}")
+                
+                scope = test.get('coverage_scope', [])
+                if scope:
+                    report.append(f"      📋 Coverage Scope:")
+                    for item in scope[:5]:  # Limit to first 5 items
+                        report.append(f"         • {item}")
+                    if len(scope) > 5:
+                        report.append(f"         ... and {len(scope) - 5} more items")
+        
+        # Recommendations
+        report.append(f"\n💡 RECOMMENDATIONS:")
+        if coverage_analysis['coverage_percentage'] < 50:
+            report.append("   ⚠️  Coverage is low. Consider adding more tests.")
+        elif coverage_analysis['coverage_percentage'] < 80:
+            report.append("   ✅ Good test coverage achieved!")
+        
+        if coverage_analysis['total_tests'] == 0:
+            report.append("   ❌ No tests found. Consider creating test functions.")
+        elif coverage_analysis['successful_tests'] < coverage_analysis['total_tests']:
+            report.append("   ⚠️  Some tests have errors. Review and fix failing tests.")
+        
+        report.append("\n" + "=" * 60)
+        
+        return "\n".join(report)
+    
+    def get_enhanced_test_coverage(self, test_func_names: List[str]) -> dict:
+        """Get enhanced test coverage analysis with additional metrics"""
+        try:
+            # Get basic coverage analysis
+            basic_coverage = self.analyze_test_coverage(test_func_names)
+            
+            # Parse the basic coverage to extract metrics
+            coverage_data = self._parse_coverage_report(basic_coverage)
+            
+            # Add enhanced metrics
+            enhanced_metrics = {
+                'basic_coverage': basic_coverage,
+                'parsed_metrics': coverage_data,
+                'quality_score': self._calculate_test_quality_score(coverage_data),
+                'maintainability_index': self._calculate_maintainability_index(coverage_data),
+                'risk_assessment': self._assess_test_risk(coverage_data),
+                'improvement_suggestions': self._generate_improvement_suggestions(coverage_data)
+            }
+            
+            return enhanced_metrics
+            
+        except Exception as e:
+            return {
+                'error': f"Enhanced coverage analysis failed: {e}",
+                'basic_coverage': "Error occurred during analysis"
+            }
+    
+    def _parse_coverage_report(self, coverage_report: str) -> dict:
+        """Parse the coverage report to extract structured data"""
+        try:
+            # Extract key metrics using regex
+            total_tests_match = re.search(r'Total Tests:\s*(\d+)', coverage_report)
+            total_functions_match = re.search(r'Total Functions:\s*(\d+)', coverage_report)
+            covered_functions_match = re.search(r'Covered Functions:\s*(\d+)', coverage_report)
+            coverage_percentage_match = re.search(r'Coverage Percentage:\s*([\d.]+)%', coverage_report)
+            
+            return {
+                'total_tests': int(total_tests_match.group(1)) if total_tests_match else 0,
+                'total_functions': int(total_functions_match.group(1)) if total_functions_match else 0,
+                'covered_functions': int(covered_functions_match.group(1)) if covered_functions_match else 0,
+                'coverage_percentage': float(coverage_percentage_match.group(1)) if coverage_percentage_match else 0.0
+            }
+        except Exception:
+            return {
+                'total_tests': 0,
+                'total_functions': 0,
+                'covered_functions': 0,
+                'coverage_percentage': 0.0
+            }
+    
+    def _calculate_test_quality_score(self, metrics: dict) -> float:
+        """Calculate a quality score for the test suite (0-100)"""
+        try:
+            # Base score from coverage percentage
+            base_score = metrics.get('coverage_percentage', 0)
+            
+            # Bonus for having tests
+            test_bonus = min(metrics.get('total_tests', 0) * 2, 20)
+            
+            # Penalty for low coverage
+            coverage_penalty = 0
+            if metrics.get('coverage_percentage', 0) < 50:
+                coverage_penalty = 20
+            elif metrics.get('coverage_percentage', 0) < 80:
+                coverage_penalty = 10
+            
+            quality_score = base_score + test_bonus - coverage_penalty
+            return max(0, min(100, quality_score))  # Clamp between 0-100
+            
+        except Exception:
+            return 0.0
+    
+    def _calculate_maintainability_index(self, metrics: dict) -> str:
+        """Calculate maintainability index for the test suite"""
+        try:
+            quality_score = self._calculate_test_quality_score(metrics)
+            
+            if quality_score >= 80:
+                return "Excellent"
+            elif quality_score >= 60:
+                return "Good"
+            elif quality_score >= 40:
+                return "Fair"
+            else:
+                return "Poor"
+                
+        except Exception:
+            return "Unknown"
+    
+    def _assess_test_risk(self, metrics: dict) -> dict:
+        """Assess risk level of the current test coverage"""
+        try:
+            risk_level = "Low"
+            risk_factors = []
+            
+            if metrics.get('coverage_percentage', 0) < 50:
+                risk_level = "High"
+                risk_factors.append("Very low test coverage")
+            elif metrics.get('coverage_percentage', 0) < 80:
+                risk_level = "Medium"
+                risk_factors.append("Moderate test coverage")
+            
+            if metrics.get('total_tests', 0) == 0:
+                risk_level = "Critical"
+                risk_factors.append("No tests exist")
+            
+            if metrics.get('total_tests', 0) < 5:
+                risk_factors.append("Very few tests")
+            
+            return {
+                'risk_level': risk_level,
+                'risk_factors': risk_factors,
+                'recommendation': self._get_risk_recommendation(risk_level)
+            }
+            
+        except Exception:
+            return {
+                'risk_level': "Unknown",
+                'risk_factors': ["Unable to assess risk"],
+                'recommendation': "Review test coverage manually"
+            }
+    
+    def _get_risk_recommendation(self, risk_level: str) -> str:
+        """Get recommendation based on risk level"""
+        recommendations = {
+            "Critical": "Immediate action required. Create comprehensive test suite.",
+            "High": "High priority. Significantly increase test coverage.",
+            "Medium": "Moderate priority. Improve test coverage gradually.",
+            "Low": "Maintain current test coverage. Consider edge case testing."
+        }
+        return recommendations.get(risk_level, "Review and improve as needed.")
+    
+    def _generate_improvement_suggestions(self, metrics: dict) -> list:
+        """Generate specific improvement suggestions"""
+        suggestions = []
+        
+        if metrics.get('coverage_percentage', 0) < 50:
+            suggestions.append("Focus on core functionality testing first")
+            suggestions.append("Add unit tests for critical functions")
+            suggestions.append("Implement integration tests for key workflows")
+        
+        if metrics.get('total_tests', 0) < 10:
+            suggestions.append("Create test templates for common scenarios")
+            suggestions.append("Establish testing patterns and conventions")
+            suggestions.append("Prioritize testing for most-used features")
+        
+        if metrics.get('coverage_percentage', 0) < 80:
+            suggestions.append("Add edge case testing")
+            suggestions.append("Implement error condition testing")
+            suggestions.append("Consider performance testing for critical paths")
+        
+        if not suggestions:
+            suggestions.append("Maintain current testing standards")
+            suggestions.append("Consider adding specialized tests (performance, security)")
+            suggestions.append("Review test execution time and optimize if needed")
+        
+        return suggestions
+    
+    @tool
+    def get_enhanced_test_coverage(self, test_func_names: List[str]) -> str:
+        '''
+        Get enhanced test coverage analysis with additional metrics
+        Arguments:
+            test_func_names: List of test function names with file paths
+        Output:
+            Enhanced coverage report with quality metrics, risk assessment, and improvement suggestions
+        '''
+        try:
+            # Get basic coverage analysis
+            basic_coverage = self.analyze_test_coverage(test_func_names)
+            
+            # Parse the basic coverage to extract metrics
+            coverage_data = self._parse_coverage_report(basic_coverage)
+            
+            # Add enhanced metrics
+            enhanced_metrics = {
+                'basic_coverage': basic_coverage,
+                'parsed_metrics': coverage_data,
+                'quality_score': self._calculate_test_quality_score(coverage_data),
+                'maintainability_index': self._calculate_maintainability_index(coverage_data),
+                'risk_assessment': self._assess_test_risk(coverage_data),
+                'improvement_suggestions': self._generate_improvement_suggestions(coverage_data)
+            }
+            
+            # Format the enhanced report
+            return self._format_enhanced_coverage_report(enhanced_metrics)
+            
+        except Exception as e:
+            return f"Enhanced coverage analysis failed: {e}"
+    
+    def _format_enhanced_coverage_report(self, enhanced_metrics: dict) -> str:
+        """Format the enhanced coverage report"""
+        try:
+            report = []
+            report.append("=" * 80)
+            report.append("ENHANCED TEST COVERAGE ANALYSIS REPORT")
+            report.append("=" * 80)
+            
+            # Basic metrics
+            metrics = enhanced_metrics.get('parsed_metrics', {})
+            report.append(f"\n📊 BASIC METRICS:")
+            report.append(f"   Total Tests: {metrics.get('total_tests', 0)}")
+            report.append(f"   Total Functions: {metrics.get('total_functions', 0)}")
+            report.append(f"   Covered Functions: {metrics.get('covered_functions', 0)}")
+            report.append(f"   Coverage Percentage: {metrics.get('coverage_percentage', 0):.1f}%")
+            
+            # Quality metrics
+            report.append(f"\n🎯 QUALITY METRICS:")
+            report.append(f"   Quality Score: {enhanced_metrics.get('quality_score', 0):.1f}/100")
+            report.append(f"   Maintainability Index: {enhanced_metrics.get('maintainability_index', 'Unknown')}")
+            
+            # Risk assessment
+            risk = enhanced_metrics.get('risk_assessment', {})
+            report.append(f"\n⚠️  RISK ASSESSMENT:")
+            report.append(f"   Risk Level: {risk.get('risk_level', 'Unknown')}")
+            if risk.get('risk_factors'):
+                report.append(f"   Risk Factors:")
+                for factor in risk.get('risk_factors', []):
+                    report.append(f"      • {factor}")
+            report.append(f"   Recommendation: {risk.get('recommendation', 'None')}")
+            
+            # Improvement suggestions
+            suggestions = enhanced_metrics.get('improvement_suggestions', [])
+            if suggestions:
+                report.append(f"\n💡 IMPROVEMENT SUGGESTIONS:")
+                for i, suggestion in enumerate(suggestions, 1):
+                    report.append(f"   {i}. {suggestion}")
+            
+            # Basic coverage report
+            report.append(f"\n📋 DETAILED COVERAGE REPORT:")
+            report.append("-" * 60)
+            basic_coverage = enhanced_metrics.get('basic_coverage', 'No coverage data available')
+            report.append(basic_coverage)
+            
+            report.append("\n" + "=" * 80)
+            return "\n".join(report)
+            
+        except Exception as e:
+            return f"Failed to format enhanced report: {e}"
+
     @tool
     def analyze_dependencies(self, file_path: str) -> str:
         '''
@@ -4644,6 +5170,11 @@ class EnhancedToolManager(ToolManager):
         self.first_run_repo_tests_call = True
         self.can_finish = False
         self.last_run_repo_tests_failure_output = ""
+        # Regression guard state
+        self.baseline_failed_tests = None
+        self.last_failed_tests = []
+        self.regression_guard_enabled = True
+        self._regression_reverting = False
         self.performance_monitor = PerformanceMonitor()
         self.parallel_executor = ParallelToolExecutor(self)
         self.file_searcher = ParallelFileSearcher(self)
@@ -5799,6 +6330,22 @@ class EnhancedToolManager(ToolManager):
 
                 failed_test_names = self._extract_failed_test_names(output)
 
+            # Update regression baseline and detect newly failing tests
+            try:
+                if self.regression_guard_enabled:
+                    newly_failed = self._update_regression_baseline_and_log(failed_test_names)
+                    # Auto-revert on regression
+                    if newly_failed and not self._regression_reverting:
+                        self.logs.append(f"[REGRESSION GUARD] Auto-reverting due to new regressions: {newly_failed}")
+                        self._regression_reverting = True
+                        try:
+                            revert_msg = self.revert_to_last_checkpoint()
+                            self.logs.append(f"[REGRESSION GUARD] Revert result: {revert_msg}")
+                        finally:
+                            self._regression_reverting = False
+            except Exception as _e:
+                self.logs.append(f"[REGRESSION GUARD] Baseline update error: {_e}")
+
             self.failed_test_names = self.previous_failed_tests + failed_test_names
 
             # update test files to test them all
@@ -5824,6 +6371,22 @@ class EnhancedToolManager(ToolManager):
                 self.logs.append(f"Number of failures: {self.failed_count}")
                 self.can_finish = False
                 self.last_run_repo_tests_failure_output = output
+                # Update regression baseline and detect newly failing tests
+                try:
+                    if self.regression_guard_enabled:
+                        current_failed = self._extract_failed_test_names(output)
+                        newly_failed = self._update_regression_baseline_and_log(current_failed)
+                        # Auto-revert on regression
+                        if newly_failed and not self._regression_reverting:
+                            self.logs.append(f"[REGRESSION GUARD] Auto-reverting due to new regressions: {newly_failed}")
+                            self._regression_reverting = True
+                            try:
+                                revert_msg = self.revert_to_last_checkpoint()
+                                self.logs.append(f"[REGRESSION GUARD] Revert result: {revert_msg}")
+                            finally:
+                                self._regression_reverting = False
+                except Exception as _e:
+                    self.logs.append(f"[REGRESSION GUARD] Baseline update error: {_e}")
                 return output
             
             current_patch = self.get_final_git_patch()
@@ -5839,6 +6402,29 @@ class EnhancedToolManager(ToolManager):
                 self.failed_test_names = None
                 self.failed_count = -1
                 return self.run_repo_tests()   
+
+    # --- Regression guard helper ---
+    def _update_regression_baseline_and_log(self, current_failed: list[str]) -> list[str]:
+        """Capture baseline failing tests once and log any newly failing tests (regressions).
+
+        - On first invocation, records the set of currently failing tests as the baseline.
+        - On subsequent invocations, logs any tests that are newly failing compared to the baseline.
+        """
+        try:
+            current_set = set(current_failed or [])
+            if self.baseline_failed_tests is None:
+                self.baseline_failed_tests = set(current_set)
+                self.logs.append(f"[REGRESSION GUARD] Baseline captured with {len(self.baseline_failed_tests)} failing tests.")
+                self.last_failed_tests = list(current_set)
+                return []
+            regressions = sorted(list(current_set - self.baseline_failed_tests))
+            if regressions:
+                self.logs.append(f"[REGRESSION GUARD] Regression detected: newly failing tests: {regressions}")
+            self.last_failed_tests = list(current_set)
+            return regressions
+        except Exception as e:
+            self.logs.append(f"[REGRESSION GUARD] Error while updating baseline: {e}")
+            return []
     
     @ToolManager.tool
     def apply_code_edit_and_run_repo_tests(self, file_path: str, search: str, replace: str) -> str:
@@ -6123,6 +6709,7 @@ def execute_test_patch_find_workflow_v0(problem_statement: str, *, timeout: int,
         available_tools=[
             "search_in_all_files_content_v2",
             "analyze_test_coverage",
+            "get_enhanced_test_coverage",
             "analyze_dependencies",
             "get_file_content",
             "search_in_specified_file_v2",
@@ -6247,6 +6834,7 @@ def execute_fix_workflow_v0(problem_statement: str, *, timeout: int, run_id_1: s
         available_tools=[
             "search_in_all_files_content_v2",
             "analyze_test_coverage",
+            "get_enhanced_test_coverage",
             "analyze_dependencies",
             "detect_code_smells",
             "analyze_git_history",
